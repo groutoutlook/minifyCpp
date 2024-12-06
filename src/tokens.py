@@ -1,4 +1,21 @@
-import ply.lex as lex
+"""
+File: tokens.py
+
+This file contains the lexer for the C language, implemented
+according to see https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
+
+This file provides the following:
+    lex(inp: str) -> List[l.LexToken]
+        This function lexes a file, returning all the lexical tokens
+        found in the file, or erroring if a lexical error exists
+    tokens: List[str]
+        This contains the names of all the lexical tokens
+
+TODO - need to break up keywords and symbols for the parser
+"""
+
+from typing import List
+import ply.lex as l
 import sys
 
 # see https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
@@ -161,16 +178,22 @@ def t_COMMENT(t):
     r"(/\*(.*?\n?)*?\*/)|(//.*)"
 
 
-@lex.TOKEN(headername)
+@l.TOKEN(headername)
 def t_HEADERNAME(t):
     return t
 
 
-if __name__ == "__main__":
-    inp = sys.stdin.read()
-    lexer = lex.lex()
+def lex(inp: str) -> List[l.LexToken]:
+    lexer = l.lex()
     lexer.input(inp)
+    ts = []
     a = lexer.token()
     while a:
-        print(a, a.value)
+        ts.append(a)
         a = lexer.token()
+    return ts
+
+
+if __name__ == "__main__":
+    inp = sys.stdin.read()
+    print(lex(inp))
