@@ -13,24 +13,6 @@ This file provides the following:
 
 """
 
-from typing import List
-import ply.lex as l
-import sys
-
-# see https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
-# starting from page 61
-tokens = [
-    # important things
-    "KEYWORD",
-    "IDENTIFIER",
-    # chose not to implement universal character names
-    "CONSTANT",
-    "STRINGLITERAL",
-    "PUNCTUATOR",
-    "HEADERNAME",
-    "COMMENT",
-]
-
 t_KEYWORD = r"|".join(
     map(
         lambda a: rf"({a})",
@@ -103,7 +85,7 @@ qchar = rf"({simple_escape_sequence})|({octal_escape_sequence})|({hex_escape_seq
 char_constant = rf"[L]?'({cchar})+'"
 t_CONSTANT = rf"({floating_constant})|({integer_constant})|({char_constant})"
 t_STRINGLITERAL = rf"[L]?\"({schar})*\""
-headername = rf"(<({hchar})+>)|(\"({qchar})+\")"
+t_HEADERNAME = rf"(<({hchar})+>)|(\"({qchar})+\")"
 t_PUNCTUATOR = r"|".join(
     map(
         lambda a: rf"({a})",
@@ -172,27 +154,26 @@ t_PUNCTUATOR = r"|".join(
 
 t_ignore = " \t\n"
 
-
-def t_COMMENT(t):
-    r"(/\*(.*?\n?)*?\*/)|(//.*)"
+t_COMMENT = r"(/\*(.*?\n?)*?\*/)|(//.*)"
 
 
-@l.TOKEN(headername)
-def t_HEADERNAME(t):
-    return t
-
-
-def lex(inp: str) -> List[l.LexToken]:
-    lexer = l.lex()
-    lexer.input(inp)
-    ts = []
-    a = lexer.token()
-    while a:
-        ts.append(a)
-        a = lexer.token()
-    return ts
-
-
-if __name__ == "__main__":
-    inp = sys.stdin.read()
-    print(lex(inp))
+# see https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
+# starting from page 61
+tokens = [
+    "COMMENT",
+    # important things
+    "KEYWORD",
+    "IDENTIFIER",
+    # chose not to implement universal character names
+    "CONSTANT",
+    "STRINGLITERAL",
+    "PUNCTUATOR",
+]
+regexes = [
+    t_COMMENT,
+    t_KEYWORD,
+    t_IDENTIFIER,
+    t_CONSTANT,
+    t_STRINGLITERAL,
+    t_PUNCTUATOR,
+]

@@ -1,8 +1,11 @@
-import importlib
+from generator.lexer import Lexer
+from out import parser
+from lang.macrotokens import tokens, regexes, t_ignore
 
 if __name__ == "__main__":
-    module = importlib.import_module("lang.parser")
-    print(module.__dict__)
-    import impl.grammarparser
-
-    impl.grammarparser.collect_productions()
+    inp = open("tmp.c").read()
+    l = Lexer(tokens, regexes, t_ignore)
+    ts = l.lex(inp)
+    print(ts)
+    parsed = parser.parse("translation_unit", ts)
+    print(parsed)

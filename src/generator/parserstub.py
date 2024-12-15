@@ -11,6 +11,7 @@ class Parser:
     ):
         self.callbacks = callbacks
         self.rule_map = {rule.name: rule for rule in grammar.rules}
+        self.cache = {}
 
     def __take_leaf(
         self, l: Leaf, tokens: List[Token], pos: int
@@ -79,19 +80,24 @@ class Parser:
 
     def __check_rule(self, rule: str, tokens: List[Token], pos: int):
         # takes the rule that succeeds that takes the most tokens
+        if (rule, pos) in self.cache:
+            return self.cache[(rule, pos)]
+
         actual_rule = self.rule_map[rule]
         best = None
         for prod in actual_rule.productions:
             r = self.__check_production(prod, tokens, pos)
             if r and (best is None or best[1] < r[1]):
                 best = r
-        if best is not None:
-            return best
-        return False
+
+        result = best if best is not None else False
+        self.cache[(rule, pos)] = result
+        return result
 
     def parse(
         self, start_symbol: str, tokens: List[Token]
     ) -> Union[list, Literal[False]]:
+        self.cache = {}
         result = self.__check_rule(start_symbol, tokens, 0)
         if result:
             return result[0]
