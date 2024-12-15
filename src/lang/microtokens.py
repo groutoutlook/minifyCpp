@@ -165,7 +165,7 @@ qchar = rf"({simple_escape_sequence})|({octal_escape_sequence})|({hex_escape_seq
 char_constant = rf"[L]?'({cchar})+'"
 t_CONSTANT = rf"({floating_constant})|({integer_constant})|({char_constant})"
 t_STRINGLITERAL = rf"[L]?\"({schar})*\""
-headername = rf"(<({hchar})+>)|(\"({qchar})+\")"
+t_HEADERNAME = rf"(<({hchar})+>)|(\"({qchar})+\")"
 
 # punctuators and literals
 literals = "()[]{}.&*+-~!/%<>^?=,#;:|"
@@ -201,11 +201,6 @@ t_ignore = " \t\n"
 
 def t_COMMENT(t):
     r"(/\*(.*?\n?)*?\*/)|(//.*)"
-
-
-@l.TOKEN(headername)
-def t_HEADERNAME(t):
-    return t
 
 
 # for export so that everything is compatable
