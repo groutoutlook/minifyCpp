@@ -156,6 +156,7 @@ t_ignore = " \t\n"
 
 t_COMMENT = r"(/\*(.*?\n?)*?\*/)|(//.*)"
 
+t_PREPROCESSOR = r"\#.*"
 
 # see https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1124.pdf
 # starting from page 61
@@ -168,6 +169,8 @@ tokens = [
     "CONSTANT",
     "STRINGLITERAL",
     "PUNCTUATOR",
+    # things that shouldn't be reduced
+    "PREPROCESSOR",
 ]
 regexes = [
     t_COMMENT,
@@ -176,4 +179,5 @@ regexes = [
     t_CONSTANT,
     t_STRINGLITERAL,
     t_PUNCTUATOR,
+    t_PREPROCESSOR,
 ]

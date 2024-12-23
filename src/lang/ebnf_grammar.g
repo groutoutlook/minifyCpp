@@ -346,6 +346,7 @@
 
     external_declaration : function_definition
         | declaration
+        | PREPROCESSOR
     
 
     function_definition : declaration_specifiers declarator compound_statement
