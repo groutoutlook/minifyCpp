@@ -25,7 +25,7 @@ class Lexer:
         while pos != len(contents):
             # first, check if this is an ignorable token
             if contents[pos] in self.ignore:
-                if pos == "\n":
+                if contents[pos] == "\n":
                     lineno += 1
                     linestart = pos + 1
                 pos += 1

@@ -133,7 +133,7 @@
     init_declarator : declarator ['=' initializer]
     
 
-    storage_class_specifier : 'typdef'
+    storage_class_specifier : 'typedef'
         | 'extern'
         | 'static'
         | 'auto'

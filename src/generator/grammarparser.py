@@ -8,10 +8,10 @@ and are in EBNF
 from generator.grammartokens import *
 from generator.types import *
 from ply.yacc import yacc
-from typing import List, Union
+from typing import List
 
 
-def p_grammar(p: List[Union[str, Rule, Grammar]]):
+def p_grammar(p: List[str | Rule | Grammar]):
     """
     grammar : rule
         | NEWLINE
@@ -35,7 +35,7 @@ def p_grammar(p: List[Union[str, Rule, Grammar]]):
             p[0] = Grammar(p[1].rules + [p[2]])
 
 
-def p_rule(p: List[Union[Production, Rule, str]]):
+def p_rule(p: List[Production | Rule | str]):
     """
     rule : NONTERMINAL ':' production NEWLINE
         | rule '|' production NEWLINE
@@ -48,7 +48,7 @@ def p_rule(p: List[Union[Production, Rule, str]]):
         p[0] = p[1]
 
 
-def p_production(p: List[Union[Production, ProductionPart]]):
+def p_production(p: List[Production | ProductionPart]):
     """
     production : production_part
         | production production_part
