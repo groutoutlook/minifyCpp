@@ -4,21 +4,15 @@
         | '(' expression ')'
     
 
-    postfix_expression : primary_expression
-        | primary_expression '[' expression ']' [postfix_expression]
-        | primary_expression '(' ')' [postfix_expression]
-        | primary_expression '(' argument_expression_list ')' [postfix_expression]
-        | primary_expression '.' IDENTIFIER [postfix_expression]
-        | primary_expression '->' IDENTIFIER [postfix_expression]
-        | primary_expression '++' [postfix_expression]
-        | primary_expression '--' [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '[' expression ']' [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '(' ')' [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '(' argument_expression_list ')' [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '.' IDENTIFIER [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '->' IDENTIFIER [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '++' [postfix_expression]
-        | '(' type_name ')' '{' initializer_list [','] '}' '--' [postfix_expression]
+    postfix : '[' expression ']'
+        | '(' [argument_expression_list] ')'
+        | '.' IDENTIFIER
+        | '->' IDENTIFIER
+        | '++'
+        | '--'
+
+    postfix_expression : primary_expression {postfix}
+        | '(' type_name ')' '{' initializer_list [','] '}' {postfix}
 
     argument_expression_list : assignment_expression {',' assignment_expression}
     
@@ -300,7 +294,7 @@
         | selection_statement
         | iteration_statement
         | jump_statement
-    
+
 
     labeled_statement : IDENTIFIER ':' statement
         | 'case' constant_expression ':' statement

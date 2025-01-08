@@ -1,7 +1,7 @@
 #include <generator/ast.hpp>
 #include <sstream>
 using namespace std;
-Token::Token(string type, string value) : type(type), value(value) {}
+Token::Token(string type, string value, int position) : type(type), value(value), position(position) {}
 ASTPart::ASTPart(vector<shared_ptr<ASTLeaf>> leaves) : leaves(leaves) {}
 ASTNode::ASTNode(string rule, vector<shared_ptr<ASTPart>> parts) : rule(rule), parts(parts) {}
 

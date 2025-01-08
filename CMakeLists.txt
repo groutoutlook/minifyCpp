@@ -43,7 +43,7 @@ add_custom_target(cgrammar DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp
 # make client applications
 add_executable(
     minifier
-    src/minifier/main.cpp
+    src/apps/minifier.cpp
     src/lang/clexer.cpp
 )
 target_include_directories(minifier PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/lang)

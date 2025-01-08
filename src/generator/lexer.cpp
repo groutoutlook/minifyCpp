@@ -49,7 +49,7 @@ vector<Token> Lexer::lex(const string &contents) const
             smatch m;
             if (regex_search(contents.begin() + pos, contents.end(), m, regexes[i]))
             {
-                if (m.length() > bestLength)
+                if (m.length() > bestLength && m.position() == 0)
                 {
                     bestLength = m.length();
                     bestToken = i;
@@ -61,7 +61,7 @@ vector<Token> Lexer::lex(const string &contents) const
         {
             throw runtime_error("Lexing failed at line " + to_string(lineno) + " col " + to_string(pos - linestart));
         }
-        tokens.push_back(Token(names[bestToken], bestVal));
+        tokens.push_back(Token(names[bestToken], bestVal, tokens.size()));
 
         // update lineno and linestart
         for (int i = 0; i < bestVal.size(); ++i)

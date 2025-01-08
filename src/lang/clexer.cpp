@@ -153,7 +153,7 @@ Lexer makeCLexer()
     string punctuatorRegex = buffer.str();
 
     // comments and preprocessors
-    string commentRegex = "(/\\*(.*?\n?)*?\\*/)|(//.*)";
+    string commentRegex = "(/\\*.*?\\*/)|(//[^\n]*)";
     string preprocessorRegex = "#[^\\n]*";
 
     vector<string> names = {"COMMENT", "KEYWORD", "IDENTIFIER", "CONSTANT", "STRINGLITERAL", "PUNCTUATOR", "PREPROCESSOR"};

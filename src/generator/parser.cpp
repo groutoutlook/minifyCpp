@@ -3,11 +3,12 @@ using namespace std;
 
 Parser::Parser(Grammar grammar) : maxPos(0)
 {
-    for (const auto &rule : grammar.rules)
+    for (const Rule &rule : grammar.rules)
     {
         ruleMap.insert({rule.name, rule});
     }
 }
+Parser::Parser(Grammar grammar, std::map<std::string, std::function<bool(ParseResult<ASTNode>)>> callbacks) : Parser(grammar) { this->callbacks = callbacks; }
 
 ParseResult<ASTLeaf> Parser::takeLeaf(const Leaf l, const std::vector<Token> &tokens, int pos)
 {
@@ -23,6 +24,7 @@ ParseResult<ASTLeaf> Parser::takeLeaf(const Leaf l, const std::vector<Token> &to
         {
             return ParseResult<ASTLeaf>(false);
         }
+        maxPos = max(maxPos, pos + 1);
         return ParseResult<ASTLeaf>(make_shared<Token>(tokens[pos]), pos + 1);
     }
     else if (l.type == "TERMINAL")
@@ -33,6 +35,7 @@ ParseResult<ASTLeaf> Parser::takeLeaf(const Leaf l, const std::vector<Token> &to
         {
             return ParseResult<ASTLeaf>(false);
         }
+        maxPos = max(maxPos, pos + 1);
         return ParseResult<ASTLeaf>(make_shared<Token>(tokens[pos]), pos + 1);
     }
     else
@@ -44,6 +47,7 @@ ParseResult<ASTLeaf> Parser::takeLeaf(const Leaf l, const std::vector<Token> &to
         {
             return ParseResult<ASTLeaf>(false);
         }
+        maxPos = max(maxPos, result.pos);
         return ParseResult<ASTLeaf>(*result.val, result.pos);
     }
 }
@@ -107,7 +111,21 @@ ParseResult<ASTNode> Parser::checkProduction(const std::string rule, const Produ
             pos = r.pos;
         }
     }
-    return ParseResult<ASTNode>(make_shared<ASTNode>(rule, parts), pos);
+    // first, check callbacks
+    ParseResult<ASTNode> success = ParseResult<ASTNode>(make_shared<ASTNode>(rule, parts), pos);
+    if (callbacks.find(rule) != callbacks.end())
+    {
+        bool r = callbacks[rule](success);
+        if (r)
+        {
+            return success;
+        }
+        else
+        {
+            return ParseResult<ASTNode>(false);
+        }
+    }
+    return success;
 }
 
 ParseResult<ASTNode> Parser::checkRule(const std::string rule, const std::vector<Token> &tokens, int pos)
@@ -136,5 +154,14 @@ ParseResult<ASTNode> Parser::checkRule(const std::string rule, const std::vector
 ParseResult<ASTNode> Parser::parse(std::string startSymbol, const std::vector<Token> &tokens)
 {
     cache.clear();
-    return checkRule(startSymbol, tokens, 0);
+    ParseResult<ASTNode> result = checkRule(startSymbol, tokens, 0);
+    if (!result)
+    {
+        throw runtime_error("Failed to parse, bad result! maxPos was " + to_string(maxPos));
+    }
+    if (result.pos < tokens.size())
+    {
+        throw runtime_error("Failed to parse, incomplete result! maxPos was " + to_string(maxPos));
+    }
+    return result;
 }

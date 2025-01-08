@@ -29,7 +29,7 @@ static struct argp_option options[] = {
 struct arguments
 {
     char *ifname; /* FILE */
-    char *ofname;
+    string ofname;
 };
 ostream &operator<<(ostream &o, Token &t)
 {
@@ -90,7 +90,7 @@ parse_opt(int key, char *arg, struct argp_state *state)
     switch (key)
     {
     case 'o':
-        arguments->ofname = arg;
+        arguments->ofname = string(arg);
         break;
 
     case ARGP_KEY_ARG:

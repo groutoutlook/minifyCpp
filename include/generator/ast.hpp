@@ -13,7 +13,8 @@ struct Token : public ASTLeaf
 {
     std::string type;
     std::string value;
-    Token(std::string type, std::string value);
+    int position; // position in the input
+    Token(std::string type, std::string value, int position);
     Token() = default;
     virtual std::string print();
 };
@@ -28,7 +29,8 @@ struct ASTPart
 struct ASTNode : ASTLeaf
 {
     std::vector<std::shared_ptr<ASTPart>> parts;
-    std::string rule;
+    std::string rule;  // name of the rule
+    int productionNum; // the index of the production used
     ASTNode(std::string rule, std::vector<std::shared_ptr<ASTPart>> parts);
     ASTNode() = default;
     virtual std::string print();

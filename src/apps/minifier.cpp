@@ -8,6 +8,26 @@
 #include "cgrammar.hpp"
 using namespace std;
 
+ostream &operator<<(ostream &o, Token &t)
+{
+    return o << t.print();
+}
+
+template <typename T>
+ostream &operator<<(ostream &o, vector<T> &v)
+{
+    o << "{";
+    for (int i = 1; i < v.size(); ++i)
+    {
+        o << v[i - 1] << ", ";
+    }
+    if (!v.empty())
+    {
+        o << v[v.size() - 1];
+    }
+    return o << "}";
+}
+
 string toSymbol(int i)
 {
     vector<char> result;
@@ -101,7 +121,7 @@ pair<int, int> dfs(ASTNode *cur, int curMaxSymbol, map<string, string> &symbolMa
         return {curMaxSymbol, maxSymbol};
     }
     // else, replace variables
-    bool special = cur->rule == "compound_statement" || cur->rule == "iteration_statement";
+    bool special = cur->rule == "compound_statement" || cur->rule == "iteration_statement" || cur->rule == "function_definition";
     int originalCurMaxSymbol = curMaxSymbol;
     map<string, string> originalSymbolMap;
     if (special)
@@ -237,7 +257,7 @@ static struct argp_option options[] = {
 struct arguments
 {
     char *ifname; /* FILE */
-    char *ofname;
+    string ofname;
 };
 
 /* Parse a single option. */
@@ -251,7 +271,7 @@ parse_opt(int key, char *arg, struct argp_state *state)
     switch (key)
     {
     case 'o':
-        arguments->ofname = arg;
+        arguments->ofname = string(arg);
         break;
 
     case ARGP_KEY_ARG:
@@ -300,18 +320,24 @@ int main(int argc, char **argv)
 
     // lex
     vector<Token> tokens = lexer.lex(contents);
+    // filter out comments
+    vector<Token> filteredTokens;
+    for (int i = 0; i < tokens.size(); ++i)
+    {
+        if (tokens[i].type != "COMMENT")
+        {
+            filteredTokens.push_back(Token(tokens[i].type, tokens[i].value, filteredTokens.size()));
+        }
+    }
 
     // parse
-    Parser p(makeGrammar());
-    ParseResult<ASTNode> result = p.parse("translation_unit", tokens);
-    if (!result)
-    {
-        return 1;
-    }
+    Parser p(makeGrammar(), {});
+    ParseResult<ASTNode> result = p.parse("translation_unit", filteredTokens);
 
     // minify
     shared_ptr<ASTNode> node = *result.val;
-    minify(node.get());
+    minify(node.get()); // TODO - also use macros
+
     vector<Token> minifiedTokens = extractTokens(node.get());
     string minifiedString = minifyTokens(minifiedTokens);
 
