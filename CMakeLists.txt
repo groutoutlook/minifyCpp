@@ -1,51 +1,77 @@
-project(golfC)
+project(GolfC)
+cmake_minimum_required(VERSION 3.5.1)
 
-cmake_minimum_required(VERSION 3.1)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "-fno-rtti")
 
-find_library(boost_regex libboost_regex.a)
-find_package(BISON)
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/bison_outputs)
-BISON_TARGET(PG src/generator/grammar.y ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs/pg.cpp DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs/pg.hpp)
+macro(add_clang_executable name)
+    add_executable(${name} ${ARGN})
 
-# compile this stuff once
-add_library(
-    parse_util
-    STATIC
-    src/generator/lexer.cpp
-    src/generator/parser.cpp
-    src/generator/ast.cpp
-    src/generator/types.cpp
-)
-target_include_directories(parse_util PRIVATE include)
-target_link_libraries(parse_util PUBLIC boost_regex)
+    target_link_libraries(${name}
+        PRIVATE
+        LLVMSupport
+        clangAST
+        clangBasic
+        clangFrontend
+        clangSerialization
+        clangTooling
+        clangFrontend
+        clangParse
+        clangSerialization
+        clangSema
+        clangAPINotes
+        clangEdit
+        clangAnalysis
+        clangSupport
+        LLVMFrontendHLSL
+        clangDriver
+        LLVMWindowsDriver
+        LLVMOption
+        clangASTMatchers
+        clangAST
+        clangFormat
+        clangToolingInclusions
+        clangToolingCore
+        clangRewrite
+        clangLex
+        clangBasic
+        LLVMFrontendOpenMP
+        LLVMScalarOpts
+        LLVMAggressiveInstCombine
+        LLVMInstCombine
+        LLVMFrontendOffloading
+        LLVMTransformUtils
+        LLVMFrontendAtomic
+        LLVMAnalysis
+        LLVMProfileData
+        LLVMSymbolize
+        LLVMDebugInfoPDB
+        LLVMDebugInfoCodeView
+        LLVMDebugInfoMSF
+        LLVMDebugInfoBTF
+        LLVMDebugInfoDWARF
+        LLVMObject
+        LLVMMCParser
+        LLVMMC
+        LLVMIRReader
+        LLVMBitReader
+        LLVMAsmParser
+        LLVMCore
+        LLVMRemarks
+        LLVMBitstreamReader
+        LLVMTextAPI
+        LLVMBinaryFormat
+        LLVMTargetParser
+        LLVMSupport
+        -lrt
+        -ldl
+        -lm
+        libz.so
+        libzstd.so
+        LLVMDemangle
+    )
+endmacro(add_clang_executable)
 
-# stage one - build the generator application
-add_executable(generator 
-    src/generator/main.cpp
-    src/generator/context.cpp
-    ${BISON_PG_OUTPUTS}
-)
-add_dependencies(generator parse_util)
-target_include_directories(generator PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs)
-target_link_libraries(generator parse_util)
 
-# produce grammar
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/lang)
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp
-    COMMAND generator ${CMAKE_CURRENT_SOURCE_DIR}/src/lang/ebnf_grammar.g -o ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp
-    DEPENDS generator ${CMAKE_CURRENT_SOURCE_DIR}/src/lang/ebnf_grammar.g
-)
-add_custom_target(cgrammar DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp)
-
-# make client applications
-add_executable(
-    minifier
-    src/apps/minifier.cpp
-    src/lang/clexer.cpp
-)
-target_include_directories(minifier PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/lang)
-add_dependencies(minifier cgrammar)
-target_link_libraries(minifier PRIVATE parse_util "-static")
+add_clang_executable(explorer src/explorer.cpp)
+add_clang_executable(minifier src/minifier.cpp)
