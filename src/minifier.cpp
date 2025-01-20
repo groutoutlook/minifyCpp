@@ -242,6 +242,24 @@ public:
         }
         return true;
     }
+
+    // reference to member variable inside an initializer
+    bool VisitDesignatedInitExpr(DesignatedInitExpr *expr)
+    {
+        auto p = getLoc(expr);
+        if (p.second)
+        {
+            for (DesignatedInitExpr::Designator &d : expr->designators())
+            {
+                if (d.isFieldDesignator())
+                {
+                    StringRef originalName = d.getFieldName()->getName();
+                    rewriter->ReplaceText(d.getFieldLoc(), originalName.size(), manager.getSymbol(d.getFieldDecl(), originalName.str()));
+                }
+            }
+        }
+        return true;
+    }
 };
 
 class MinifierConsumer : public clang::ASTConsumer

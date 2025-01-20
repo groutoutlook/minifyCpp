@@ -134,7 +134,7 @@ public:
 
             llvm::outs() << "Found variable declaration of "
                          << decl->getNameAsString() << " as type " << decl->getType()
-                         << "(found at " << decl->getType().getCanonicalType() << ")";
+                         << "(found at " << decl->getType().getCanonicalType() << ")\n";
         }
         return true;
     }
@@ -174,6 +174,38 @@ public:
             llvm::outs() << "Found member reference to "
                          << expr->getMemberDecl()->getCanonicalDecl()
                          << " which is " << expr->getMemberDecl()->getQualifiedNameAsString() << "\n";
+        }
+        return true;
+    }
+    // reference to member variable inside an initializer
+    bool VisitDesignatedInitExpr(DesignatedInitExpr *expr)
+    {
+        auto p = getLoc(expr);
+        if (p.second)
+        {
+            llvm::outs() << "Found designated initializer at ";
+            p.first.dump(context->getSourceManager());
+            for (DesignatedInitExpr::Designator &d : expr->designators())
+            {
+                llvm::outs() << "designator is ";
+                if (d.isFieldDesignator())
+                {
+                    llvm::outs() << "field " << d.getFieldName()->getName() << " with location ";
+                    d.getFieldLoc().dump(context->getSourceManager());
+                }
+                else if (d.isArrayDesignator())
+                {
+                    llvm::outs() << "array designator\n";
+                }
+                else if (d.isArrayRangeDesignator())
+                {
+                    llvm::outs() << "array range designator\n";
+                }
+                else
+                {
+                    llvm::outs() << "unknown?!?!?\n";
+                }
+            }
         }
         return true;
     }

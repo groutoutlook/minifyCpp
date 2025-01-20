@@ -3,8 +3,10 @@
 
 struct myStruct
 {
+    double d1, d2;
     int val1;
     int val2;
+    int *ptr;
 };
 
 void printMyStruct(struct myStruct *pointer)
@@ -14,10 +16,18 @@ void printMyStruct(struct myStruct *pointer)
 
 int main()
 {
+    int a = 1;
+    int b = 2;
     struct myStruct m1;
     struct myStruct m2 = {
-        .val1 = 3,
-        .val2 = 4};
+        .val1 = a + b,
+        .val2 = 42,
+        .d1 = 0.2,
+    };
+    const struct myStruct m3 = {};
+    struct myStruct m4 = {
+        .ptr = 0};
+    struct myStruct arr[3] = {[1].d1 = 33.3};
     printMyStruct(&m1);
     printMyStruct(&m2);
 }
