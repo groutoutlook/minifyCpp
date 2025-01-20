@@ -13,6 +13,11 @@ void printMyStruct(struct myStruct *pointer)
 {
     printf("{myStruct, val1: %d, val2: %d}", pointer->val1, pointer->val2);
 }
+void sum_two(int a, int b)
+{
+    int c = a + b;
+    printf("The sum is %d\n", c);
+}
 
 int main()
 {
@@ -30,4 +35,16 @@ int main()
     struct myStruct arr[3] = {[1].d1 = 33.3};
     printMyStruct(&m1);
     printMyStruct(&m2);
+    if (m2.val1 == 3)
+    {
+        int cool = 5;
+        printf("Cool!! %d\n", cool);
+        sum_two(cool, a);
+    }
+    else
+    {
+        int other = 2;
+        printf("Oh no... %d\n", other);
+        sum_two(other, b);
+    }
 }

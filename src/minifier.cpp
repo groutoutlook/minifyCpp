@@ -57,25 +57,39 @@ const set<string> keywords = {
     "_Imaginary",
 };
 
-string toSymbol(int i)
+/**
+ * @brief Calculates the next number that can be used for an identifier
+ *
+ * @param i the current number requested
+ * @return pair<int, string> a pair containing (nextNumber, identifier)
+ */
+pair<int, string> toSymbol(int i)
 {
-    vector<char> result;
-    while (i >= 0)
+    int curNum = i;
+    string result;
+    do
     {
-        int tmp = i % 52; // use every lowercase and uppercase letter
-        if (tmp < 26)
+        i = curNum;
+        vector<char> resultArr;
+        while (i >= 0)
         {
-            result.push_back('a' + tmp);
+            int tmp = i % 52; // use every lowercase and uppercase letter
+            if (tmp < 26)
+            {
+                resultArr.push_back('a' + tmp);
+            }
+            else
+            {
+                resultArr.push_back('A' + tmp - 26);
+            }
+            i /= 52;
+            i -= 1;
         }
-        else
-        {
-            result.push_back('A' + tmp - 26);
-        }
-        i /= 52;
-        i -= 1;
-    }
-    reverse(result.begin(), result.end());
-    return string(result.begin(), result.end());
+        reverse(resultArr.begin(), resultArr.end());
+        result = string(resultArr.begin(), resultArr.end());
+        ++curNum;
+    } while (keywords.find(result) != keywords.end());
+    return {curNum, result};
 }
 
 // for now, we will not rename structs or enums or typedefs
@@ -91,17 +105,26 @@ string toSymbol(int i)
 // canonical declaration
 struct Scope
 {
-    int maxUsedSymbol = 0; // exclusive
-    Scope() {}
+    SourceLocation end;
+    int maxUsedSymbol; // exclusive
+    Scope(SourceLocation end, int maxUsedSymbol = 0) : end(end), maxUsedSymbol(maxUsedSymbol) {}
 };
 class StateManager
 {
-    vector<pair<Scope, SourceLocation>> scopes; // pair of scope and when that scope ends
-    map<QualType, int> recordNames;             // for struct/union name rewrites
-    map<QualType, int> typedefNames;            // for typedef name rewrites
-    map<QualType, int> enumNames;               // for enum name rewrites
-    map<Decl *, int> declarations;              // for variables and functions
+    vector<Scope> scopes;            // pair of scope and when that scope ends
+    map<QualType, int> recordNames;  // for struct/union name rewrites
+    map<QualType, int> typedefNames; // for typedef name rewrites
+    map<QualType, int> enumNames;    // for enum name rewrites
+    map<Decl *, int> declarations;   // for variables and functions
     ASTContext *context;
+
+    void adjustScopes(SourceLocation cur)
+    {
+        while (cur > scopes.back().end)
+        {
+            scopes.pop_back();
+        }
+    }
 
 public:
     StateManager(ASTContext *context) : context(context)
@@ -109,21 +132,69 @@ public:
         // start with a global scope
         // TODO - handle multiple files
         FileID mainFileId = context->getSourceManager().getMainFileID();
-        scopes.push_back({Scope(), context->getSourceManager().getLocForEndOfFile(mainFileId)});
+        scopes.push_back(Scope(context->getSourceManager().getLocForEndOfFile(mainFileId)));
     };
+    /**
+     * @brief Adds a symbol for the declaration to the current scope
+     *
+     * @param decl the declaration. It should be a new declaration not already added with `addSymbol`.
+     *       If it already exists in the scope, then its existing symbol is replaced
+     * @return string
+     */
     string addSymbol(Decl *decl)
     {
-        int symbolNum = scopes.back().first.maxUsedSymbol++;
+        // first, adjust scopes
+        adjustScopes(decl->getLocation());
+
+        // store it in declarations
+        int symbolNum = scopes.back().maxUsedSymbol;
+        auto [nextSymbolNum, str] = toSymbol(symbolNum);
         declarations[decl->getCanonicalDecl()] = symbolNum;
-        return toSymbol(symbolNum);
+        scopes.back().maxUsedSymbol = nextSymbolNum;
+        return str;
     }
+    /**
+     * @brief Get the abbreviated symbol for the given declaration, or fall
+     * back to original
+     *
+     * @param decl
+     * @param original
+     * @return string
+     */
     string getSymbol(Decl *decl, string original)
     {
         if (declarations.find(decl->getCanonicalDecl()) == declarations.end())
         {
             return original;
         }
-        return toSymbol(declarations[decl->getCanonicalDecl()]);
+        return toSymbol(declarations[decl->getCanonicalDecl()]).second;
+    }
+    /**
+     * @brief Push an empty scope onto the scope stack
+     *
+     * @param end the source location, inclusive, of when the scope should end
+     *
+     * @details This method adds a scope that will be completely empty, meaning that symbols will start again
+     * from 0, no matter what the current scope's maxSymbol is presently
+     *
+     */
+    void pushEmptyScope(SourceLocation end)
+    {
+        adjustScopes(end);
+        scopes.push_back(Scope(end));
+    }
+    /**
+     * @brief Push a scope identical to the current scope onto the scope stack
+     *
+     * @end the source location, inclusive, of when the scope should end
+     *
+     * @details This method adds a scope that has the same maxSymbol as the current scope
+     *
+     */
+    void pushCurScope(SourceLocation end)
+    {
+        adjustScopes(end);
+        scopes.push_back(Scope(end, scopes.back().maxUsedSymbol));
     }
 };
 
@@ -152,8 +223,6 @@ public:
         SourceManager &m = context->getSourceManager();
         SourceLocation begin = decl->getBeginLoc();
         SourceLocation spellingLoc = m.getSpellingLoc(begin);
-        // bool wasMacroArg = m.isMacroArgExpansion(begin);
-        // bool wasMacro = wasMacroArg || m.isMacroBodyExpansion(begin);
         if (spellingLoc.isValid() &&
             m.getFilename(spellingLoc) == sourceFileName)
         {
@@ -169,6 +238,8 @@ public:
         if (p.second)
         {
             // TODO - rewrite record names
+            // push a new scope since the struct is its own scope
+            manager.pushEmptyScope(decl->getEndLoc());
         }
         return true;
     }
@@ -194,17 +265,32 @@ public:
         return true;
     }
 
+    // compound statements (simply add a cur scope)
+    bool VisitCompoundStmt(CompoundStmt *s)
+    {
+        pair<SourceLocation, bool> p = getLoc(s);
+        if (p.second)
+        {
+            // push
+            manager.pushCurScope(s->getEndLoc());
+        }
+        return true;
+    }
+
     // functions
     bool VisitFunctionDecl(FunctionDecl *decl)
     {
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
+            // do replacement first (since function needs to be visible to following items)
             if (decl->getNameAsString() != "main")
             {
                 // then rewrite this function too
                 rewriter->ReplaceText(decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl));
             }
+            // then push a new scope based on current scope
+            manager.pushCurScope(decl->getEndLoc());
         }
         return true;
     }
@@ -296,7 +382,7 @@ public:
     virtual void EndSourceFileAction() override
     {
         error_code ec;
-        raw_fd_ostream out("out.c", ec);
+        raw_fd_ostream out("out.c", ec); // TODO - make this configurable
         rewriter->getEditBuffer(rewriter->getSourceMgr().getMainFileID()).write(out);
         out.close();
     }
