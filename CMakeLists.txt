@@ -75,5 +75,4 @@ endmacro(add_clang_executable)
 
 
 add_clang_executable(explorer src/explorer.cpp)
-add_clang_executable(minifier src/actions/minifier.cpp)
-add_clang_executable(tokens src/main.cpp src/format/minifyFormat.cpp)
+add_clang_executable(tokens src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)

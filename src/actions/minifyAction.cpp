@@ -1,4 +1,4 @@
-// #include <actions/minifier.hpp>
+#include <actions/minifyAction.hpp>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Frontend/CompilerInstance.h>
@@ -209,14 +209,14 @@ class MinifierVisitor
     : public RecursiveASTVisitor<MinifierVisitor>
 {
 private:
-    Rewriter *rewriter;
+    Replacements *replacements;
     ASTContext *context;
     string sourceFileName;
     StateManager manager;
 
 public:
-    explicit MinifierVisitor(Rewriter *r, ASTContext *context, string sourceFileName)
-        : rewriter(r), context(context), sourceFileName(sourceFileName), manager(context) {}
+    explicit MinifierVisitor(Replacements *r, ASTContext *context, string sourceFileName)
+        : replacements(r), context(context), sourceFileName(sourceFileName), manager(context) {}
 
     template <typename T>
     pair<SourceLocation, bool> getLoc(T *decl)
@@ -250,7 +250,7 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            rewriter->ReplaceText(decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
         }
         return true;
     }
@@ -288,7 +288,7 @@ public:
             if (decl->getNameAsString() != "main")
             {
                 // then rewrite this function too
-                rewriter->ReplaceText(decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl));
+                cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
             }
             // then push a new scope based on current scope
             manager.pushCurScope(decl->getEndLoc());
@@ -302,7 +302,7 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            rewriter->ReplaceText(decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
         }
         return true;
     }
@@ -314,7 +314,7 @@ public:
         if (p.second)
         {
             string originalName = expr->getDecl()->getNameAsString();
-            rewriter->ReplaceText(p.first, originalName.size(), manager.getSymbol(expr->getDecl(), originalName));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), p.first, originalName.size(), manager.getSymbol(expr->getDecl(), originalName))));
         }
         return true;
     }
@@ -325,7 +325,7 @@ public:
         if (p.second)
         {
             string originalName = expr->getMemberDecl()->getNameAsString();
-            rewriter->ReplaceText(expr->getExprLoc(), originalName.size(), manager.getSymbol(expr->getMemberDecl(), originalName));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), expr->getExprLoc(), originalName.size(), manager.getSymbol(expr->getMemberDecl(), originalName))));
         }
         return true;
     }
@@ -341,7 +341,7 @@ public:
                 if (d.isFieldDesignator())
                 {
                     StringRef originalName = d.getFieldName()->getName();
-                    rewriter->ReplaceText(d.getFieldLoc(), originalName.size(), manager.getSymbol(d.getFieldDecl(), originalName.str()));
+                    cantFail(replacements->add(Replacement(context->getSourceManager(), d.getFieldLoc(), originalName.size(), manager.getSymbol(d.getFieldDecl(), originalName.str()))));
                 }
             }
         }
@@ -355,7 +355,7 @@ private:
     MinifierVisitor visitor;
 
 public:
-    explicit MinifierConsumer(Rewriter *r, ASTContext *context, string sourceFileName)
+    explicit MinifierConsumer(Replacements *r, ASTContext *context, string sourceFileName)
         : visitor(r, context, sourceFileName) {}
 
     virtual void HandleTranslationUnit(clang::ASTContext &context) override
@@ -363,75 +363,27 @@ public:
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 };
-
-class MinifierAction : public clang::ASTFrontendAction
+MinifierAction::MinifierAction(Replacements *replacements) : replacements(replacements) {};
+std::unique_ptr<clang::ASTConsumer>
+MinifierAction::CreateASTConsumer(clang::CompilerInstance &compiler,
+                                  llvm::StringRef inFile)
 {
-private:
-    unique_ptr<Rewriter> rewriter;
+    return std::make_unique<MinifierConsumer>(
+        replacements, &compiler.getASTContext(),
+        inFile.str());
+}
 
-public:
-    virtual std::unique_ptr<clang::ASTConsumer>
-    CreateASTConsumer(clang::CompilerInstance &compiler,
-                      llvm::StringRef inFile) override
-    {
-        llvm::outs() << "Processing " << inFile << "\n";
-        rewriter = make_unique<Rewriter>(compiler.getASTContext().getSourceManager(), compiler.getASTContext().getLangOpts());
-        return std::make_unique<MinifierConsumer>(
-            rewriter.get(), &compiler.getASTContext(),
-            inFile.str());
-    }
-    virtual void EndSourceFileAction() override
-    {
-        error_code ec;
-        raw_fd_ostream out("out.c", ec); // TODO - make this configurable
-        rewriter->getEditBuffer(rewriter->getSourceMgr().getMainFileID()).write(out);
-        out.close();
-    }
-};
-
-// Apply a custom category to all command-line options so that they are the
-// only ones displayed.
-static cl::OptionCategory MyToolCategory("minifier options");
-
-// CommonOptionsParser declares HelpMessage with a description of the common
-// command-line options related to the compilation database and input files.
-// It's nice to have this help message in all tools.
-static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
-
-// A help message for this specific tool can be added afterwards.
-static cl::extrahelp MoreHelp("\nThe minifier tool is meant to be run on a single file.\n");
-
-int main(int argc, const char **argv)
+std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements)
 {
-    auto expectedParser = CommonOptionsParser::create(argc, argv, MyToolCategory);
-    if (!expectedParser)
+    class MinifierActionFactory : public FrontendActionFactory
     {
-        llvm::errs() << expectedParser.takeError();
-        return 1;
-    }
-    CommonOptionsParser &optionsParser = expectedParser.get();
-    ClangTool tool(optionsParser.getCompilations(),
-                   optionsParser.getSourcePathList());
-
-    // double check that conditions are met before running our tool
-    // TODO - handle multiple files
-    if (optionsParser.getSourcePathList().size() == 0)
-    {
-        llvm::outs() << "No input files\n";
-        return 2;
-    }
-    if (optionsParser.getSourcePathList().size() > 1)
-    {
-        llvm::outs() << "Too many input files, expected a single file\n";
-        return 3;
-    }
-    int result = tool.run(newFrontendActionFactory<SyntaxOnlyAction>().get());
-    if (result != 0)
-    {
-        llvm::outs() << "Failed to minify due to syntax errors\n";
-        return 4;
-    }
-
-    // all conditions met, run our minifier
-    return tool.run(newFrontendActionFactory<MinifierAction>().get());
+    public:
+        Replacements *replacements;
+        MinifierActionFactory(Replacements *rs) : replacements(rs) {};
+        std::unique_ptr<FrontendAction> create() override
+        {
+            return std::make_unique<MinifierAction>(replacements);
+        }
+    };
+    return std::make_unique<MinifierActionFactory>(replacements);
 }
