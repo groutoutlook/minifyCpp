@@ -1,3 +1,4 @@
+// #include <actions/minifier.hpp>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Frontend/CompilerInstance.h>
@@ -363,7 +364,7 @@ public:
     }
 };
 
-class ExplorerAction : public clang::ASTFrontendAction
+class MinifierAction : public clang::ASTFrontendAction
 {
 private:
     unique_ptr<Rewriter> rewriter;
@@ -432,5 +433,5 @@ int main(int argc, const char **argv)
     }
 
     // all conditions met, run our minifier
-    return tool.run(newFrontendActionFactory<ExplorerAction>().get());
+    return tool.run(newFrontendActionFactory<MinifierAction>().get());
 }

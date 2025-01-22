@@ -6,6 +6,7 @@ set(CMAKE_CXX_FLAGS "-fno-rtti")
 
 macro(add_clang_executable name)
     add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE include)
 
     target_link_libraries(${name}
         PRIVATE
@@ -74,4 +75,5 @@ endmacro(add_clang_executable)
 
 
 add_clang_executable(explorer src/explorer.cpp)
-add_clang_executable(minifier src/minifier.cpp)
+add_clang_executable(minifier src/actions/minifier.cpp)
+add_clang_executable(tokens src/main.cpp src/format/minifyFormat.cpp)
