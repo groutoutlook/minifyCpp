@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(GolfC)
+project(GolfC VERSION 1.0.1)
 
 option(LLVMVersion "LLVMVersion" 17)
 
@@ -19,21 +19,40 @@ add_definitions(${CLANG_DEFINITIONS})
 include(AddLLVM)
 include(/usr/lib/llvm-${LLVMVersion}/lib/cmake/clang/AddClang.cmake)  # not sure why this needed the explicit path...
 
-add_clang_executable(explorer src/explorer.cpp)
-add_clang_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)
-target_link_libraries(explorer
-  PRIVATE
-  clangAST
-  clangBasic
-  clangFrontend
-  clangSerialization
-  clangTooling
-)
-target_link_libraries(minifier
-  PRIVATE
-  clangAST
-  clangBasic
-  clangFrontend
-  clangSerialization
-  clangTooling
-)
+macro (add_tooling_executable name)
+  add_clang_executable(${name} ${ARGN})
+  target_link_libraries(
+    ${name}  
+    PRIVATE
+    clangAST
+    clangBasic
+    clangFrontend
+    clangSerialization
+    clangTooling
+  )
+  install(
+    TARGETS
+    ${name}
+    RUNTIME
+    DESTINATION
+    bin
+  )
+endmacro(add_tooling_executable)
+
+# debug executable, for development
+if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+  add_tooling_executable(explorer src/explorer.cpp)
+endif()
+
+# actual applications
+add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)
+
+# package
+set(LLVMDEP "libllvm${LLVMVersion}")
+set(CPACK_GENERATOR "DEB")
+set(CPACK_PACKAGE_NAME "golfC")
+set(CPACK_PACKAGE_VENDOR "chrehall68")
+set(CPACK_PACK_DEBIAN_ARCHITECTURE ${CMAKE_HOST_SYSTEM_PROCESSOR})
+set(CPACK_DEBIAN_PACKAGE_DEPENDS ${LLVMDEP})
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "chrehall68")
+include(CPack)

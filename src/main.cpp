@@ -14,26 +14,16 @@ using namespace llvm;
 static cl::OptionCategory options("options");
 static cl::opt<std::string> file(
     cl::Positional,
-    cl::desc("<source>"),
+    cl::desc("[source]"),
     cl::cat(options));
 static cl::opt<bool> inPlace(
     "i",
-    cl::desc("Whether to process the file in place"),
+    cl::desc("Whether to process the file in place, only works if [source] is specified"),
     cl::value_desc("inplace"), cl::init(false), cl::cat(options));
 static cl::list<std::string> ArgsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
     cl::sub(cl::SubCommand::getAll()), cl::cat(options));
-
-FileID createInMemoryFile(StringRef FileName, MemoryBufferRef Source,
-                          SourceManager &Sources, FileManager &Files,
-                          llvm::vfs::InMemoryFileSystem *MemFS)
-{
-    MemFS->addFileNoOwn(FileName, 0, Source);
-    auto File = Files.getOptionalFileRef(FileName);
-    assert(File && "File not added to MemFS?");
-    return Sources.createFileID(*File, SourceLocation(), SrcMgr::C_User);
-}
 
 int main(int argc, const char **argv)
 {
@@ -44,16 +34,25 @@ int main(int argc, const char **argv)
     cl::ParseCommandLineOptions(
         argc, argv,
         "A tool to format C code\n\n"
-        "If -i is specified, the file is edited in-place. Otherwise, the\n"
-        "result is written to the standard output.\n");
+        "If a file is provided, the contents of the file is read and formatted.\n"
+        "Otherwise, the code to format is assumed to be on stdin.\n"
+        "If -i is specified, the file is edited in-place. This only works when\n"
+        "an input file is specified. Otherwise, the result is written to the stdout.\n");
 
     // read in file
     string fileName = file.getValue();
     unique_ptr<MemoryBuffer> code;
-    if (fileName.empty())
+    bool fromSTDIN = fileName.empty();
+    if (fromSTDIN)
     {
-        errs() << "Please provide a source file. Or, use the --help flag for information on how to use this tool.\n";
-        return 1;
+        errs() << "No source file provided, assuming input is on stdin\n";
+        ErrorOr<unique_ptr<MemoryBuffer>> codeOrErr = MemoryBuffer::getSTDIN();
+        if (std::error_code ec = codeOrErr.getError())
+        {
+            errs() << "failed to read input from stdin: " << ec.message() << "\n";
+            return 1;
+        }
+        code = std::move(codeOrErr.get());
     }
     else
     {
@@ -62,20 +61,26 @@ int main(int argc, const char **argv)
         if (std::error_code ec = codeOrErr.getError())
         {
             errs() << fileName << ": " << ec.message() << "\n";
-            return 2;
+            return 4;
         }
         code = std::move(codeOrErr.get());
     }
 
+    // create FS and set up file, if needed
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs = llvm::vfs::getRealFileSystem();
-    // IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> fs = IntrusiveRefCntPtr(new llvm::vfs::InMemoryFileSystem);
     IntrusiveRefCntPtr<FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fs));
     IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
     DiagnosticsEngine diagnostics(
         IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
     SourceManager sm(diagnostics, *fileManagerPtr);
-    // FileID id = createInMemoryFile(fileName, *code, sm, *fileManagerPtr, fs.get());
-    // sm.setMainFileID(id);
+    if (fromSTDIN)
+    {
+        fileName = "/tmp/golfC-Minifier.c";
+        error_code ignored;
+        raw_fd_ostream tmpFileWriter(fileName, ignored);
+        tmpFileWriter << code->getBuffer();
+        tmpFileWriter.close();
+    }
 
     // apply minify action
     if (compDB == nullptr)
@@ -113,7 +118,7 @@ int main(int argc, const char **argv)
 
     // output
     RewriteBuffer &buffer = rewriter.getEditBuffer(sm.getMainFileID());
-    if (inPlace.getValue())
+    if (inPlace.getValue() && !fromSTDIN)
     {
         error_code ec;
         raw_fd_ostream out(fileName, ec);

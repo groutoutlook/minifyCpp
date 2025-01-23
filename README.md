@@ -10,7 +10,7 @@ Note: as of now, you must provide the include directories as extra arguments to 
 For instance:
 
 ```sh
-minifier myFile.c -- -I /usr/include
+minifier myFile.c -- -I /usr/lib/clang/17/include
 ```
 
 ## Building Natively
@@ -34,13 +34,19 @@ cmake --build .
 
 After running the above, there should be an executable `minifier` in the `build` directory
 
-## Building with Docker
+## Building/Running with Docker
 
-You can also build the executable with Docker. Simply run the below command to generate
-an executable `minifier` in the current directory.
+You can also build and run the executable with Docker. Simply run the below command to build
+the docker image.
 
 ```sh
-docker build --output=. .
+docker build --tag=golfC .
+```
+
+Then, you can run the executable with the following command. Output will be on stdout.
+
+```sh
+docker run -i golfC < myFile.c
 ```
 
 ## Motivation

@@ -12,9 +12,12 @@ COPY CMakeLists.txt /work/
 RUN mkdir build && \
     cd build && \
     cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVMVersion=17 && \
-    cmake --build .
+    cmake --build . && \
+    cpack .
 
-# output stage
-FROM scratch
-COPY --from=build /work/build/minifier /
-ENTRYPOINT [ "minifier" ]
+# runnable
+FROM ubuntu:24.04 AS executable
+COPY --from=build /work/build/golfC-1.0.1-Linux.deb /
+RUN apt-get update && \
+    apt install /golfC-1.0.1-Linux.deb clang-17 -y
+ENTRYPOINT [ "minifier", "--", "-I", "/usr/lib/clang/17/include" ]
