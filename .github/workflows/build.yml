@@ -15,7 +15,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update &&
-          sudo apt-get install libclang-cpp17-dev cmake -y
+          sudo apt-get install build-essential libclang-17-dev clang-17 llvm-17-dev cmake -y
       - name: CMake Configure
         run: |
           mkdir build &&

@@ -9,8 +9,38 @@ Alternatively, add the -i flag in order to apply the changes in place.
 Note: as of now, you must provide the include directories as extra arguments to the executable.
 For instance:
 
-```
+```sh
 minifier myFile.c -- -I /usr/include
+```
+
+## Building Natively
+
+In order to build the executable natively, you'll need to have the following packages
+installed on your system:
+
+- libclang-17-dev
+- clang-17
+- llvm-17-dev
+
+You'll also need a working C++ compiler.
+
+If you have all of these, you can run the below to configure and make the project.
+
+```sh
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVMVersion=17
+cmake --build .
+```
+
+After running the above, there should be an executable `minifier` in the `build` directory
+
+## Building with Docker
+
+You can also build the executable with Docker. Simply run the below command to generate
+an executable `minifier` in the current directory.
+
+```sh
+docker build --output=. .
 ```
 
 ## Motivation

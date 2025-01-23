@@ -1,5 +1,5 @@
+cmake_minimum_required(VERSION 3.22.1)
 project(GolfC)
-cmake_minimum_required(VERSION 3.5.1)
 
 option(LLVMVersion "LLVMVersion" 17)
 
