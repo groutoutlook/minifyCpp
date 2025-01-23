@@ -93,7 +93,8 @@ Replacements MinifyFormatter::process()
     LastTokenType lastTokenType = BOF;
     SourceLocation prevLocation = sm.getLocForStartOfFile(sm.getMainFileID());
     bool didSkip = false; // in case we had to skip a macro area
-    while (didSkip || (lexer.Lex(tok) && !tok.is(tok::eof)))
+    // lexer.LexFromRawLexer returns false if still good
+    while (didSkip || (!lexer.LexFromRawLexer(tok) && !tok.is(tok::eof)))
     {
         // reset this
         didSkip = false;
@@ -128,7 +129,7 @@ Replacements MinifyFormatter::process()
         // if it was a preprocessor, skip till the end of the preprocessor
         if (tok.is(tok::hash))
         {
-            while (lexer.Lex(tok) && !tok.isAtStartOfLine())
+            while (!lexer.LexFromRawLexer(tok) && !tok.isAtStartOfLine())
             {
                 // update last location
                 prevLocation = tok.getEndLoc();

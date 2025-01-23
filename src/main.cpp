@@ -105,7 +105,6 @@ int main(int argc, const char **argv)
     replacements = formatter.process();
 
     // save format replacements too
-    rewriter = Rewriter(sm, LangOptions());
     if (!applyAllReplacements(replacements, rewriter))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
@@ -114,7 +113,6 @@ int main(int argc, const char **argv)
 
     // output
     RewriteBuffer &buffer = rewriter.getEditBuffer(sm.getMainFileID());
-
     if (inPlace.getValue())
     {
         error_code ec;

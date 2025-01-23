@@ -90,7 +90,6 @@ public:
         {
             llvm::outs() << "Found field declaration of " << decl->getQualifiedNameAsString()
                          << "(" << decl->getCanonicalDecl() << ")\n";
-            llvm::outs() << "Is global: " << decl->isFromGlobalModule() << "\n";
             decl->getLocation().dump(context->getSourceManager());
             decl->dumpColor();
             decl->getType().dump();
@@ -107,7 +106,6 @@ public:
             llvm::outs() << "Found typedef declaration of " << decl->getNameAsString()
                          << " (" << decl->getCanonicalDecl() << ")"
                          << "\n";
-            llvm::outs() << "Is global: " << decl->isFromGlobalModule() << "\n";
         }
         return true;
     }
@@ -120,7 +118,6 @@ public:
         {
             llvm::outs() << "Found function declaration of "
                          << decl->getNameAsString() << "\n";
-            llvm::outs() << "Is global: " << decl->isGlobal() << "\n";
         }
         return true;
     }

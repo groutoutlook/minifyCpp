@@ -5,7 +5,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -15,12 +15,12 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update &&
-          sudo apt-get install libboost-regex-dev cmake bison -y
+          sudo apt-get install libclang-cpp17-dev cmake -y
       - name: CMake Configure
         run: |
           mkdir build &&
           cd build &&
-          cmake ..
+          cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVMVersion=17
       - name: Build
         run: |
           cd build &&
