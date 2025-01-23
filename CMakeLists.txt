@@ -1,51 +1,39 @@
-project(golfC)
+cmake_minimum_required(VERSION 3.22.1)
+project(GolfC)
 
-cmake_minimum_required(VERSION 3.1)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(LLVMVersion "LLVMVersion" 17)
 
-find_library(boost_regex libboost_regex.a)
-find_package(BISON)
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/bison_outputs)
-BISON_TARGET(PG src/generator/grammar.y ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs/pg.cpp DEFINES_FILE ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs/pg.hpp)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "-fno-rtti")
 
-# compile this stuff once
-add_library(
-    parse_util
-    STATIC
-    src/generator/lexer.cpp
-    src/generator/parser.cpp
-    src/generator/ast.cpp
-    src/generator/types.cpp
+find_package(LLVM ${LLVMVersion} REQUIRED)
+find_package(Clang ${LLVMVersion} REQUIRED)
+
+include_directories(${LLVM_INCLUDE_DIRS})
+include_directories(${CLANG_INCLUDE_DIRS})
+include_directories(include)
+
+add_definitions(${LLVM_DEFINITIONS})
+add_definitions(${CLANG_DEFINITIONS})
+
+include(AddLLVM)
+include(/usr/lib/llvm-${LLVMVersion}/lib/cmake/clang/AddClang.cmake)  # not sure why this needed the explicit path...
+
+add_clang_executable(explorer src/explorer.cpp)
+add_clang_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)
+target_link_libraries(explorer
+  PRIVATE
+  clangAST
+  clangBasic
+  clangFrontend
+  clangSerialization
+  clangTooling
 )
-target_include_directories(parse_util PRIVATE include)
-target_link_libraries(parse_util PUBLIC boost_regex)
-
-# stage one - build the generator application
-add_executable(generator 
-    src/generator/main.cpp
-    src/generator/context.cpp
-    ${BISON_PG_OUTPUTS}
+target_link_libraries(minifier
+  PRIVATE
+  clangAST
+  clangBasic
+  clangFrontend
+  clangSerialization
+  clangTooling
 )
-add_dependencies(generator parse_util)
-target_include_directories(generator PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/bison_outputs)
-target_link_libraries(generator parse_util)
-
-# produce grammar
-make_directory(${CMAKE_CURRENT_BINARY_DIR}/lang)
-add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp
-    COMMAND generator ${CMAKE_CURRENT_SOURCE_DIR}/src/lang/ebnf_grammar.g -o ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp
-    DEPENDS generator ${CMAKE_CURRENT_SOURCE_DIR}/src/lang/ebnf_grammar.g
-)
-add_custom_target(cgrammar DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lang/cgrammar.hpp)
-
-# make client applications
-add_executable(
-    minifier
-    src/apps/minifier.cpp
-    src/lang/clexer.cpp
-)
-target_include_directories(minifier PRIVATE include ${CMAKE_CURRENT_BINARY_DIR}/lang)
-add_dependencies(minifier cgrammar)
-target_link_libraries(minifier PRIVATE parse_util "-static")

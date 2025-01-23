@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <ctype.h>
+
 /**
  * @brief An example implementation of the Linux xxd tool
  *
