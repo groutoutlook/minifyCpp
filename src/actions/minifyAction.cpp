@@ -101,6 +101,15 @@ pair<int, string> toSymbol(int i, set<string> &reserved)
 
 class StateManager
 {
+public:
+    enum SymbolType
+    {
+        VAR_OR_FUNC = 0,
+        ENUM,
+        STRUCT,
+    };
+
+private:
     // class that will deal with the state of the explorer,
     // ie the stack of scopes
     // function adds symbol to scope, then pushes a new scope set to current scope's
@@ -111,15 +120,37 @@ class StateManager
     struct Scope
     {
         SourceLocation end;
-        int maxUsedSymbol;           // exclusive
-        set<string> externalSymbols; // list of externally-defined function/variable names already in the current scope
-        Scope(SourceLocation end, int maxUsedSymbol = 0) : end(end), maxUsedSymbol(maxUsedSymbol) {}
+        struct ScopePair
+        {
+            int maxUsedSymbol;
+            set<string> externalSymbols;
+
+            ScopePair() : maxUsedSymbol(0) {};
+            ScopePair(const ScopePair &other) : maxUsedSymbol(other.maxUsedSymbol) {};
+        };
+
+        map<SymbolType, ScopePair> usedSymbols;
+
+        Scope(SourceLocation end) : end(end)
+        {
+            usedSymbols[VAR_OR_FUNC] = ScopePair{};
+            usedSymbols[ENUM] = ScopePair{};
+        }
+        Scope(SourceLocation end, const Scope &other) : end(end)
+        {
+            usedSymbols[VAR_OR_FUNC] = ScopePair(other.usedSymbols.find(VAR_OR_FUNC)->second);
+        }
+
+        ScopePair &operator[](SymbolType tp)
+        {
+            return usedSymbols[tp];
+        }
     };
 
     vector<Scope> scopes;            // pair of scope and when that scope ends
     map<QualType, int> recordNames;  // for struct/union name rewrites
     map<QualType, int> typedefNames; // for typedef name rewrites
-    map<QualType, int> enumNames;    // for enum name rewrites
+    map<void *, int> enums;          // for enum name rewrites
     map<Decl *, int> declarations;   // for variables and functions
     ASTContext *context;
 
@@ -135,6 +166,21 @@ class StateManager
     }
 
 public:
+    /**
+     * @brief StateManager constructor
+     *
+     * Creates a StateManager to manage the state of the MinifierAction's
+     * explorer. The StateManager will keep track of the current scope.
+     * The current scope is the scope most recently added to the scope stack.
+     * The scope stack is a stack of scopes, each with a start and end location.
+     * When a new scope is added to the scope stack, it is added on top of the
+     * current scope, and the current scope is set to the new scope.
+     * When a declaration is added to the current scope, it is added to the
+     * current scope's set of symbols.
+     * The StateManager also keeps track of all of the symbols added to all of the
+     * scopes in the scope stack.
+     * @param context the ASTContext to use with this StateManager
+     */
     StateManager(ASTContext *context) : context(context)
     {
         // start with a global scope
@@ -148,16 +194,37 @@ public:
      *       If it already exists in the scope, then its existing symbol is replaced
      * @return string
      */
-    string addSymbol(Decl *decl)
+    string addSymbol(Decl *decl, SymbolType tp)
     {
         // first, adjust scopes
         adjustScopes(decl->getLocation());
 
         // store it in declarations
-        int symbolNum = scopes.back().maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().externalSymbols); // external symbols only really apply from global scope
+        Scope::ScopePair &relevant = scopes.back()[tp];
+        int symbolNum = relevant.maxUsedSymbol;
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front()[tp].externalSymbols); // external symbols only really apply from global scope
         declarations[decl->getCanonicalDecl()] = symbolNum;
-        scopes.back().maxUsedSymbol = nextSymbolNum;
+        relevant.maxUsedSymbol = nextSymbolNum;
+        return str;
+    }
+    string addSymbol(SourceLocation location, QualType tp, SymbolType stp)
+    {
+        // first, adjust scopes
+        adjustScopes(location);
+
+        // store it in declarations
+        Scope::ScopePair &relevant = scopes.back()[stp];
+        int symbolNum = relevant.maxUsedSymbol;
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front()[stp].externalSymbols); // external symbols only really apply from global scope
+        if (stp == ENUM)
+        {
+            enums[tp.getAsOpaquePtr()] = symbolNum;
+        }
+        else
+        {
+            errs() << "UNSUPPORTED AS OF NOW\n"; // TODO
+        }
+        relevant.maxUsedSymbol = nextSymbolNum;
         return str;
     }
     /**
@@ -166,13 +233,21 @@ public:
      * @param decl the declaration that cannot be rewritten
      * @param symbol
      */
-    void addExternalSymbol(Decl *decl, string symbol)
+    void addExternalSymbol(Decl *decl, string symbol, SymbolType tp)
     {
         // first, adjust scopes
         adjustScopes(decl->getLocation());
 
         // then, add the symbol
-        scopes.back().externalSymbols.emplace(symbol);
+        scopes.back()[tp].externalSymbols.emplace(symbol);
+    }
+    void addExternalSymbol(SourceLocation location, string symbol, SymbolType tp)
+    {
+        // first, adjust scopes
+        adjustScopes(location);
+
+        // then, add the symbol
+        scopes.back()[tp].externalSymbols.emplace(symbol);
     }
     /**
      * @brief Get the abbreviated symbol for the given declaration, or fall
@@ -182,15 +257,27 @@ public:
      * @param original
      * @return string
      */
-    string getSymbol(Decl *decl, string original)
+    optional<string> getSymbol(Decl *decl, SymbolType tp)
     {
+        // TODO - use different maps for var_or_func vs enum
         if (declarations.find(decl->getCanonicalDecl()) == declarations.end())
         {
-            return original;
+            return optional<string>();
         }
         // external symbols only really apply from global scope
-        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front().externalSymbols).second;
+        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front()[tp].externalSymbols).second;
     }
+    optional<string> getSymbol(QualType tp, SymbolType stp)
+    {
+        if (stp == ENUM && enums.find(tp.getAsOpaquePtr()) == enums.end())
+        {
+            return optional<string>();
+        }
+        return toSymbol(enums[tp.getAsOpaquePtr()], scopes.front()[stp].externalSymbols).second;
+    }
+
+    // enums
+
     /**
      * @brief Push an empty scope onto the scope stack
      *
@@ -216,7 +303,7 @@ public:
     void pushCurScope(SourceLocation end)
     {
         adjustScopes(end);
-        scopes.push_back(Scope(end, scopes.back().maxUsedSymbol));
+        scopes.push_back(Scope(end, scopes.back()));
     }
 };
 
@@ -258,7 +345,15 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            // TODO - do stuff here? maybe replace the enum name
+            // register it and replace it
+            QualType tp(decl->getTypeForDecl(), 0);
+            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM);
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), replacement)));
+        }
+        else
+        {
+            // register it
+            manager.addExternalSymbol(decl->getLocation(), decl->getNameAsString(), StateManager::ENUM);
         }
         return true;
     }
@@ -269,12 +364,12 @@ public:
         {
             // need to add this to known declarations
             // and then also replace this
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
         }
         else
         {
             // external, maybe it affects us, maybe not
-            manager.addExternalSymbol(decl, decl->getNameAsString());
+            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
         }
         return true;
     }
@@ -301,7 +396,7 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
         } // can't rewrite code outside of file
         return true;
     }
@@ -339,7 +434,7 @@ public:
             if (decl->getNameAsString() != "main")
             {
                 // then rewrite this function too
-                cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+                cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
             }
             // then push a new scope based on current scope
             manager.pushCurScope(decl->getEndLoc());
@@ -347,7 +442,7 @@ public:
         else
         {
             // external, maybe it affects us, maybe not
-            manager.addExternalSymbol(decl, decl->getNameAsString());
+            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
             // and also push a new scope
             manager.pushCurScope(decl->getEndLoc());
         }
@@ -360,13 +455,13 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
         }
         else
         {
             // external, but might be an accessible global variable
             // so add it as an external symbol
-            manager.addExternalSymbol(decl, decl->getNameAsString());
+            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
         }
         return true;
     }
@@ -378,7 +473,10 @@ public:
         if (p.second)
         {
             string originalName = expr->getDecl()->getNameAsString();
-            cantFail(replacements->add(Replacement(context->getSourceManager(), p.first, originalName.size(), manager.getSymbol(expr->getDecl(), originalName))));
+            if (optional<string> replacement = manager.getSymbol(expr->getDecl(), StateManager::VAR_OR_FUNC))
+            {
+                cantFail(replacements->add(Replacement(context->getSourceManager(), p.first, originalName.size(), *replacement)));
+            }
         } // can't rewrite code outside of file
         return true;
     }
@@ -389,7 +487,10 @@ public:
         if (p.second)
         {
             string originalName = expr->getMemberDecl()->getNameAsString();
-            cantFail(replacements->add(Replacement(context->getSourceManager(), expr->getExprLoc(), originalName.size(), manager.getSymbol(expr->getMemberDecl(), originalName))));
+            if (optional<string> replacement = manager.getSymbol(expr->getMemberDecl(), StateManager::VAR_OR_FUNC))
+            {
+                cantFail(replacements->add(Replacement(context->getSourceManager(), expr->getExprLoc(), originalName.size(), *replacement)));
+            }
         } // can't rewrite code outside of file
         return true;
     }
@@ -405,10 +506,28 @@ public:
                 if (d.isFieldDesignator())
                 {
                     StringRef originalName = d.getFieldName()->getName();
-                    cantFail(replacements->add(Replacement(context->getSourceManager(), d.getFieldLoc(), originalName.size(), manager.getSymbol(d.getFieldDecl(), originalName.str()))));
+                    if (optional<string> replacement = manager.getSymbol(d.getFieldDecl(), StateManager::VAR_OR_FUNC))
+                    {
+                        cantFail(replacements->add(Replacement(context->getSourceManager(), d.getFieldLoc(), originalName.size(), *replacement)));
+                    }
                 }
             }
         } // can't rewrite code outside of file
+        return true;
+    }
+
+    // enum types
+    bool VisitEnumTypeLoc(EnumTypeLoc loc)
+    {
+        if (context->getSourceManager().isInMainFile(loc.getBeginLoc()))
+        {
+            string name = loc.getDecl()->getNameAsString();
+            // try replacement
+            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM))
+            {
+                cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
+            }
+        }
         return true;
     }
 };

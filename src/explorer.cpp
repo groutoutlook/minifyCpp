@@ -54,7 +54,8 @@ public:
         if (p.second)
         {
             outs() << "Found enum declaration of " << decl->getNameAsString()
-                   << "(" << decl->getCanonicalDecl() << ")\n";
+                   << "(" << decl->getCanonicalDecl() << ") with qualtype " << QualType(decl->getTypeForDecl(), 0).getAsOpaquePtr() << " ";
+            decl->getLocation().dump(context->getSourceManager());
         }
         return true;
     }
@@ -212,7 +213,7 @@ public:
     {
         if (true)
         {
-            outs() << "visiting plain type loc ";
+            outs() << "visiting plain type loc for " << loc.getType().getCanonicalType() << " (" << loc.getType().getAsOpaquePtr() << ") ";
             loc.getType().dump();
 
             if (loc.getType().hasQualifiers())
@@ -226,7 +227,25 @@ public:
 
             outs() << " at ";
             loc.getBeginLoc().dump(context->getSourceManager());
+            if (loc.getTypePtr()->isElaboratedTypeSpecifier())
+            {
+                outs() << "elaborated type spec!\n";
+            }
+            if (loc.getTypePtr()->isEnumeralType())
+            {
+                outs() << "enum type\n";
+            }
+            if (loc.getTypePtr()->isEnumeralType() && !loc.getTypePtr()->isElaboratedTypeSpecifier())
+            {
+                outs() << "special actual enum type, name is " << loc.castAs<EnumTypeLoc>().getDecl()->getNameAsString() << "\n";
+            }
         }
+        return true;
+    }
+    bool VisitEnumTypeLoc(EnumTypeLoc loc)
+    {
+        outs() << "got enum type loc at "; // TODO - use enumtypeloc instead of generic typeloc and then casting
+        loc.getBeginLoc().dump(context->getSourceManager());
         return true;
     }
 };
