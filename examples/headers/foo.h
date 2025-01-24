@@ -10,3 +10,5 @@ struct foostruct
 };
 
 int sum(struct foostruct *f);
+
+int a(int b, int c);

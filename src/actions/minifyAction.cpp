@@ -19,7 +19,7 @@ using namespace llvm;
 
 // constants
 const set<string> keywords = {
-    // "auto",
+    "auto",
     "break",
     "case",
     "char",
@@ -64,7 +64,7 @@ const set<string> keywords = {
  * @param i the current number requested
  * @return pair<int, string> a pair containing (nextNumber, identifier)
  */
-pair<int, string> toSymbol(int i)
+pair<int, string> toSymbol(int i, set<string> &reserved)
 {
     int curNum = i;
     string result;
@@ -89,7 +89,9 @@ pair<int, string> toSymbol(int i)
         reverse(resultArr.begin(), resultArr.end());
         result = string(resultArr.begin(), resultArr.end());
         ++curNum;
-    } while (keywords.find(result) != keywords.end());
+
+        // keep going while this is a keyword or reserved identifier
+    } while (keywords.find(result) != keywords.end() || reserved.find(result) != reserved.end());
     return {curNum, result};
 }
 
@@ -97,21 +99,23 @@ pair<int, string> toSymbol(int i)
 // due to the fact that these are hard to trace in function pointer
 // definitions
 
-// class that will deal with the state of the explorer,
-// ie the stack of scopes
-// function adds symbol to scope, then pushes a new scope set to current scope's
-//      maxUsedSymbol
-// struct/union adds symbol to scope, then pushes a new scope set to 0
-// enum/typedefs/vars just add to the scope
-// canonical declaration
-struct Scope
-{
-    SourceLocation end;
-    int maxUsedSymbol; // exclusive
-    Scope(SourceLocation end, int maxUsedSymbol = 0) : end(end), maxUsedSymbol(maxUsedSymbol) {}
-};
 class StateManager
 {
+    // class that will deal with the state of the explorer,
+    // ie the stack of scopes
+    // function adds symbol to scope, then pushes a new scope set to current scope's
+    //      maxUsedSymbol
+    // struct/union adds symbol to scope, then pushes a new scope set to 0
+    // enum/typedefs/vars just add to the scope
+    // canonical declaration
+    struct Scope
+    {
+        SourceLocation end;
+        int maxUsedSymbol;           // exclusive
+        set<string> externalSymbols; // list of externally-defined function/variable names already in the current scope
+        Scope(SourceLocation end, int maxUsedSymbol = 0) : end(end), maxUsedSymbol(maxUsedSymbol) {}
+    };
+
     vector<Scope> scopes;            // pair of scope and when that scope ends
     map<QualType, int> recordNames;  // for struct/union name rewrites
     map<QualType, int> typedefNames; // for typedef name rewrites
@@ -121,7 +125,10 @@ class StateManager
 
     void adjustScopes(SourceLocation cur)
     {
-        while (cur > scopes.back().end)
+        // case where cur is in a different translation unit
+        // since locations might be in different files, we compare them
+        // with something more complicated than cur > scopes.back().end
+        while (!context->getSourceManager().isBeforeInTranslationUnit(cur, scopes.back().end))
         {
             scopes.pop_back();
         }
@@ -131,7 +138,6 @@ public:
     StateManager(ASTContext *context) : context(context)
     {
         // start with a global scope
-        // TODO - handle multiple files
         FileID mainFileId = context->getSourceManager().getMainFileID();
         scopes.push_back(Scope(context->getSourceManager().getLocForEndOfFile(mainFileId)));
     };
@@ -149,10 +155,24 @@ public:
 
         // store it in declarations
         int symbolNum = scopes.back().maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum);
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().externalSymbols); // external symbols only really apply from global scope
         declarations[decl->getCanonicalDecl()] = symbolNum;
         scopes.back().maxUsedSymbol = nextSymbolNum;
         return str;
+    }
+    /**
+     * @brief Adds a symbol that cannot be rewritten to the current scope
+     *
+     * @param decl the declaration that cannot be rewritten
+     * @param symbol
+     */
+    void addExternalSymbol(Decl *decl, string symbol)
+    {
+        // first, adjust scopes
+        adjustScopes(decl->getLocation());
+
+        // then, add the symbol
+        scopes.back().externalSymbols.emplace(symbol);
     }
     /**
      * @brief Get the abbreviated symbol for the given declaration, or fall
@@ -168,7 +188,8 @@ public:
         {
             return original;
         }
-        return toSymbol(declarations[decl->getCanonicalDecl()]).second;
+        // external symbols only really apply from global scope
+        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front().externalSymbols).second;
     }
     /**
      * @brief Push an empty scope onto the scope stack
@@ -231,6 +252,32 @@ public:
         }
         return {spellingLoc, false};
     }
+    // enums
+    bool VisitEnumDecl(EnumDecl *decl)
+    {
+        auto p = getLoc(decl);
+        if (p.second)
+        {
+            // TODO - do stuff here? maybe replace the enum name
+        }
+        return true;
+    }
+    bool VisitEnumConstantDecl(EnumConstantDecl *decl)
+    {
+        auto p = getLoc(decl);
+        if (p.second)
+        {
+            // need to add this to known declarations
+            // and then also replace this
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+        }
+        else
+        {
+            // external, maybe it affects us, maybe not
+            manager.addExternalSymbol(decl, decl->getNameAsString());
+        }
+        return true;
+    }
 
     // structs
     bool VisitRecordDecl(RecordDecl *decl)
@@ -242,6 +289,10 @@ public:
             // push a new scope since the struct is its own scope
             manager.pushEmptyScope(decl->getEndLoc());
         }
+        else
+        {
+            // TODO - log used struct names
+        }
         return true;
     }
     // struct members
@@ -251,7 +302,7 @@ public:
         if (p.second)
         {
             cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
-        }
+        } // can't rewrite code outside of file
         return true;
     }
 
@@ -293,6 +344,13 @@ public:
             // then push a new scope based on current scope
             manager.pushCurScope(decl->getEndLoc());
         }
+        else
+        {
+            // external, maybe it affects us, maybe not
+            manager.addExternalSymbol(decl, decl->getNameAsString());
+            // and also push a new scope
+            manager.pushCurScope(decl->getEndLoc());
+        }
         return true;
     }
 
@@ -303,6 +361,12 @@ public:
         if (p.second)
         {
             cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl))));
+        }
+        else
+        {
+            // external, but might be an accessible global variable
+            // so add it as an external symbol
+            manager.addExternalSymbol(decl, decl->getNameAsString());
         }
         return true;
     }
@@ -315,7 +379,7 @@ public:
         {
             string originalName = expr->getDecl()->getNameAsString();
             cantFail(replacements->add(Replacement(context->getSourceManager(), p.first, originalName.size(), manager.getSymbol(expr->getDecl(), originalName))));
-        }
+        } // can't rewrite code outside of file
         return true;
     }
     // reference to member variable
@@ -326,7 +390,7 @@ public:
         {
             string originalName = expr->getMemberDecl()->getNameAsString();
             cantFail(replacements->add(Replacement(context->getSourceManager(), expr->getExprLoc(), originalName.size(), manager.getSymbol(expr->getMemberDecl(), originalName))));
-        }
+        } // can't rewrite code outside of file
         return true;
     }
 
@@ -344,7 +408,7 @@ public:
                     cantFail(replacements->add(Replacement(context->getSourceManager(), d.getFieldLoc(), originalName.size(), manager.getSymbol(d.getFieldDecl(), originalName.str()))));
                 }
             }
-        }
+        } // can't rewrite code outside of file
         return true;
     }
 };

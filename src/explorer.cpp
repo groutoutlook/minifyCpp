@@ -53,8 +53,8 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found enum declaration of " << decl->getNameAsString()
-                         << "(" << decl->getCanonicalDecl() << ")\n";
+            outs() << "Found enum declaration of " << decl->getNameAsString()
+                   << "(" << decl->getCanonicalDecl() << ")\n";
         }
         return true;
     }
@@ -63,8 +63,8 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found enum constant declaration of " << decl->getNameAsString()
-                         << "(" << decl->getCanonicalDecl() << ")\n";
+            outs() << "Found enum constant declaration of " << decl->getNameAsString()
+                   << "(" << decl->getCanonicalDecl() << ")\n";
         }
         return true;
     }
@@ -75,8 +75,8 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found record declaration of " << decl->getNameAsString()
-                         << "(" << decl->getCanonicalDecl() << ")\n";
+            outs() << "Found record declaration of " << decl->getNameAsString()
+                   << "(" << decl->getCanonicalDecl() << ")\n";
             decl->getBeginLoc();
             decl->getEndLoc();
         }
@@ -88,8 +88,8 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found field declaration of " << decl->getQualifiedNameAsString()
-                         << "(" << decl->getCanonicalDecl() << ")\n";
+            outs() << "Found field declaration of " << decl->getQualifiedNameAsString()
+                   << "(" << decl->getCanonicalDecl() << ")\n";
             decl->getLocation().dump(context->getSourceManager());
             decl->dumpColor();
             decl->getType().dump();
@@ -103,9 +103,9 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found typedef declaration of " << decl->getNameAsString()
-                         << " (" << decl->getCanonicalDecl() << ")"
-                         << "\n";
+            outs() << "Found typedef declaration of " << decl->getNameAsString()
+                   << " (" << decl->getCanonicalDecl() << ")"
+                   << "\n";
         }
         return true;
     }
@@ -116,8 +116,8 @@ public:
         auto p = getLoc(decl);
         if (p.second)
         {
-            llvm::outs() << "Found function declaration of "
-                         << decl->getNameAsString() << "\n";
+            outs() << "Found function declaration of "
+                   << decl->getNameAsString() << "\n";
         }
         return true;
     }
@@ -129,9 +129,9 @@ public:
         if (p.second)
         {
 
-            llvm::outs() << "Found variable declaration of "
-                         << decl->getNameAsString() << " as type " << decl->getType()
-                         << "(found at " << decl->getType().getCanonicalType() << ")\n";
+            outs() << "Found variable declaration of "
+                   << decl->getNameAsString() << " as type " << decl->getType()
+                   << "(found at " << decl->getType().getCanonicalType() << ")\n";
         }
         return true;
     }
@@ -140,23 +140,23 @@ public:
     bool VisitDeclRefExpr(DeclRefExpr *expr)
     {
         auto p = getLoc(expr);
-        // llvm::outs() << "other stuff: ";
+        // outs() << "other stuff: ";
         // context->getSourceManager().getExpansionLoc(expr->getLocation()).dump(context->getSourceManager());
         // context->getSourceManager().getSpellingLoc(expr->getLocation()).dump(context->getSourceManager());
-        // llvm::outs() << "validity: " << expr->getLocation().isValid() << ", file id: " << (context->getSourceManager().getFileID(expr->getLocation()) == context->getSourceManager().getMainFileID())
+        // outs() << "validity: " << expr->getLocation().isValid() << ", file id: " << (context->getSourceManager().getFileID(expr->getLocation()) == context->getSourceManager().getMainFileID())
         //              << (context->getSourceManager().getFileID(context->getSourceManager().getFileLoc(expr->getLocation())) == context->getSourceManager().getMainFileID()) << "\n";
-        // llvm::outs() << "is macro arg: " << context->getSourceManager().isMacroArgExpansion(expr->getLocation()) << " is body expansion: " << context->getSourceManager().isMacroBodyExpansion(expr->getLocation()) << "\n";
+        // outs() << "is macro arg: " << context->getSourceManager().isMacroArgExpansion(expr->getLocation()) << " is body expansion: " << context->getSourceManager().isMacroBodyExpansion(expr->getLocation()) << "\n";
         if (p.second)
         {
-            llvm::outs() << "Found expression reference to "
-                         << expr->getDecl()->getCanonicalDecl() << "\n";
-            llvm::outs() << "This expression references " << expr->getDecl()->getNameAsString() << "\n";
+            outs() << "Found expression reference to "
+                   << expr->getDecl()->getCanonicalDecl() << "\n";
+            outs() << "This expression references " << expr->getDecl()->getNameAsString() << "\n";
             expr->dumpColor();
             expr->getLocation().dump(context->getSourceManager());
         }
         else
         {
-            // llvm::outs() << "This expression wasn't valid?" << "\n";
+            // outs() << "This expression wasn't valid?" << "\n";
             // expr->dumpColor();
             // expr->getLocation().dump(context->getSourceManager());
         }
@@ -168,9 +168,9 @@ public:
         auto p = getLoc(expr);
         if (p.second)
         {
-            llvm::outs() << "Found member reference to "
-                         << expr->getMemberDecl()->getCanonicalDecl()
-                         << " which is " << expr->getMemberDecl()->getQualifiedNameAsString() << "\n";
+            outs() << "Found member reference to "
+                   << expr->getMemberDecl()->getCanonicalDecl()
+                   << " which is " << expr->getMemberDecl()->getQualifiedNameAsString() << "\n";
         }
         return true;
     }
@@ -180,29 +180,52 @@ public:
         auto p = getLoc(expr);
         if (p.second)
         {
-            llvm::outs() << "Found designated initializer at ";
+            outs() << "Found designated initializer at ";
             p.first.dump(context->getSourceManager());
             for (DesignatedInitExpr::Designator &d : expr->designators())
             {
-                llvm::outs() << "designator is ";
+                outs() << "designator is ";
                 if (d.isFieldDesignator())
                 {
-                    llvm::outs() << "field " << d.getFieldName()->getName() << " with location ";
+                    outs() << "field " << d.getFieldName()->getName() << " with location ";
                     d.getFieldLoc().dump(context->getSourceManager());
                 }
                 else if (d.isArrayDesignator())
                 {
-                    llvm::outs() << "array designator\n";
+                    outs() << "array designator\n";
                 }
                 else if (d.isArrayRangeDesignator())
                 {
-                    llvm::outs() << "array range designator\n";
+                    outs() << "array range designator\n";
                 }
                 else
                 {
-                    llvm::outs() << "unknown?!?!?\n";
+                    outs() << "unknown?!?!?\n";
                 }
             }
+        }
+        return true;
+    }
+
+    // types
+    bool VisitTypeLoc(TypeLoc loc)
+    {
+        if (true)
+        {
+            outs() << "visiting plain type loc ";
+            loc.getType().dump();
+
+            if (loc.getType().hasQualifiers())
+            {
+                outs() << "with qualifiers ";
+            }
+            else
+            {
+                outs() << "without qualifiers ";
+            }
+
+            outs() << " at ";
+            loc.getBeginLoc().dump(context->getSourceManager());
         }
         return true;
     }
@@ -230,7 +253,7 @@ public:
     CreateASTConsumer(clang::CompilerInstance &compiler,
                       llvm::StringRef inFile) override
     {
-        llvm::outs() << "Processing " << inFile << "\n";
+        outs() << "Processing " << inFile << "\n";
         return std::make_unique<FindNamedClassConsumer>(&compiler.getASTContext(),
                                                         inFile.str());
     }
