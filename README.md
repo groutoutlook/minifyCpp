@@ -1,4 +1,4 @@
-# GolfC
+# minify-C
 
 Ever wanted to minify your C code? Now you can. This repository provides a code-minifier for
 programs written in C. Simply build the repository and run the executable `minifier` on
@@ -11,6 +11,99 @@ For instance:
 
 ```sh
 minifier myFile.c -- -I /usr/lib/clang/17/include
+```
+
+## Features
+
+- Removes whitespace in between symbols
+- Renames all structs, fields, enums, typedefs, and variables in the main file to the first available symbol.
+- Edit in-place or print edits to stdout
+
+## Example
+
+Given a file containing
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <ctype.h>
+
+/**
+ * @brief An example implementation of the Linux xxd tool
+ *
+ * @param argc
+ * @param argv
+ * @return int
+ */
+int main(int argc, char *argv[])
+{
+    // open file
+    int file = STDIN_FILENO;
+    if (argc == 2)
+        file = open(argv[1], O_RDONLY);
+
+    // initialize vars
+    int good = 1;
+    char buf[16];
+    char *cur = buf;
+    int remaining = 16;
+    int r;
+    int execution_num = 0;
+
+    // main loop
+    while (good)
+    {
+        r = read(file, cur, remaining);
+        if (r == -1)
+            exit(2);
+        cur += r;
+        remaining -= r;
+        if (remaining == 0 || (r == 0 && remaining != 16))
+        {
+            printf("%08x    ", execution_num);
+            execution_num += 16;
+            for (int j = 0; j < 16; ++j)
+            {
+                if (j < 16 - remaining)
+                    printf("%02hhx", buf[j]);
+                else
+                    printf("  ");
+                if (j % 2 != 0)
+                    printf(" ");
+            }
+            printf("    ");
+            for (int j = 0; j < 16; ++j)
+            {
+                if (j < 16 - remaining)
+                {
+                    if (isprint(buf[j]))
+                        printf("%c", buf[j]);
+                    else
+                        printf(".");
+                }
+                else
+                    printf(" ");
+            }
+            cur = buf;
+            remaining = 16;
+            printf("\n");
+        }
+        good = r != 0;
+    }
+}
+```
+
+The current output is the following:
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <ctype.h>
+int main(int a,char*b[]){int c=STDIN_FILENO;if(a==2)c=open(b[1],O_RDONLY);int d=1;char e[16];char*f=e;int g=16;int h;int i=0;while(d){h=read(c,f,g);if(h==-1)exit(2);f+=h;g-=h;if(g==0||(h==0&&g!=16)){printf("%08x    ",i);i+=16;for(int j=0;j<16;++j){if(j<16-g)printf("%02hhx",e[j]);else printf("  ");if(j%2!=0)printf(" ");}printf("    ");for(int k=0;k<16;++k){if(k<16-g){if(isprint(e[k]))printf("%c",e[k]);else printf(".");}else printf(" ");}f=e;g=16;printf("\n");}d=h!=0;}}
 ```
 
 ## Building Natively
@@ -40,13 +133,13 @@ You can also build and run the executable with Docker. Simply run the below comm
 the docker image.
 
 ```sh
-docker build --tag=golfC .
+docker build --tag=minifier .
 ```
 
 Then, you can run the executable with the following command. Output will be on stdout.
 
 ```sh
-docker run -i golfC < myFile.c
+docker run -i minifier < myFile.c
 ```
 
 ## Motivation
@@ -70,3 +163,9 @@ in bytes, and X is the length of the next available identifier, then a define is
 and all occurrences of the pattern are replaced with the identifier assigned to the pattern.
 
 Finally, we do a pass over the tokens to remove spaces where applicable.
+
+## Known Limitations
+
+- minify-C is meant for minimizing a single source C file. It will not work with C++.
+- While minify-C can properly handle includes, there is currently no support for multi-file minimization.
+- If you define macros in your main file, minify-C may not work properly (try examples/macros/main.c to see why)
