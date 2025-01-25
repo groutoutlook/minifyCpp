@@ -106,7 +106,8 @@ public:
         {
             outs() << "Found typedef declaration of " << decl->getNameAsString()
                    << " (" << decl->getCanonicalDecl() << ")"
-                   << "\n";
+                   << " at ";
+            decl->getLocation().dump(context->getSourceManager());
         }
         return true;
     }
@@ -118,7 +119,22 @@ public:
         if (p.second)
         {
             outs() << "Found function declaration of "
-                   << decl->getNameAsString() << "\n";
+                   << decl->getNameAsString() << " from ";
+            decl->getBeginLoc().dump(context->getSourceManager());
+            outs() << "to ";
+            decl->getEndLoc().dump(context->getSourceManager());
+        }
+        return true;
+    }
+    bool VisitCompoundStmt(CompoundStmt *stmt)
+    {
+        auto p = getLoc(stmt);
+        if (p.second)
+        {
+            outs() << "found compound statement from ";
+            stmt->getBeginLoc().dump(context->getSourceManager());
+            outs() << "to ";
+            stmt->getEndLoc().dump(context->getSourceManager());
         }
         return true;
     }
@@ -209,42 +225,22 @@ public:
     }
 
     // types
-    bool VisitTypeLoc(TypeLoc loc)
-    {
-        if (true)
-        {
-            outs() << "visiting plain type loc for " << loc.getType().getCanonicalType() << " (" << loc.getType().getAsOpaquePtr() << ") ";
-            loc.getType().dump();
-
-            if (loc.getType().hasQualifiers())
-            {
-                outs() << "with qualifiers ";
-            }
-            else
-            {
-                outs() << "without qualifiers ";
-            }
-
-            outs() << " at ";
-            loc.getBeginLoc().dump(context->getSourceManager());
-            if (loc.getTypePtr()->isElaboratedTypeSpecifier())
-            {
-                outs() << "elaborated type spec!\n";
-            }
-            if (loc.getTypePtr()->isEnumeralType())
-            {
-                outs() << "enum type\n";
-            }
-            if (loc.getTypePtr()->isEnumeralType() && !loc.getTypePtr()->isElaboratedTypeSpecifier())
-            {
-                outs() << "special actual enum type, name is " << loc.castAs<EnumTypeLoc>().getDecl()->getNameAsString() << "\n";
-            }
-        }
-        return true;
-    }
     bool VisitEnumTypeLoc(EnumTypeLoc loc)
     {
-        outs() << "got enum type loc at "; // TODO - use enumtypeloc instead of generic typeloc and then casting
+        outs() << "got enum type loc for " << loc.getDecl()->getNameAsString() << " (" << loc.getType().getAsOpaquePtr() << ") at ";
+        loc.getBeginLoc().dump(context->getSourceManager());
+        return true;
+    }
+    bool VisitRecordTypeLoc(RecordTypeLoc loc)
+    {
+
+        outs() << "got record type loc for " << loc.getDecl()->getNameAsString() << " (" << loc.getType().getAsOpaquePtr() << ") at ";
+        loc.getBeginLoc().dump(context->getSourceManager());
+        return true;
+    }
+    bool VisitTypedefTypeLoc(TypedefTypeLoc loc)
+    {
+        outs() << "got typedef type loc for " << loc.getTypedefNameDecl()->getNameAsString() << " at ";
         loc.getBeginLoc().dump(context->getSourceManager());
         return true;
     }

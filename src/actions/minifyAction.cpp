@@ -101,14 +101,6 @@ pair<int, string> toSymbol(int i, set<string> &reserved)
 
 class StateManager
 {
-public:
-    enum SymbolType
-    {
-        VAR_OR_FUNC = 0,
-        ENUM_OR_RECORD,
-        TYPEDEF, // TODO - start this
-    };
-
 private:
     // class that will deal with the state of the explorer,
     // ie the stack of scopes
@@ -125,46 +117,29 @@ private:
             int maxUsedSymbol;
             set<string> externalSymbols;
 
-            ScopePair() : maxUsedSymbol(0) {};
-            ScopePair(const ScopePair &other) : maxUsedSymbol(other.maxUsedSymbol) {};
+            ScopePair(int maxUsedSymbol = 0) : maxUsedSymbol(maxUsedSymbol) {};
         };
 
-        map<SymbolType, ScopePair> usedSymbols;
+        ScopePair declarations;
+        ScopePair typeNames;
 
-        Scope(SourceLocation end) : end(end)
-        {
-            usedSymbols[VAR_OR_FUNC] = ScopePair{};
-            usedSymbols[ENUM_OR_RECORD] = ScopePair{};
-            usedSymbols[TYPEDEF] = ScopePair{}; // TODO - use this
-        }
-        Scope(SourceLocation end, const Scope &other) : end(end)
-        {
-            usedSymbols[VAR_OR_FUNC] = ScopePair(other.usedSymbols.find(VAR_OR_FUNC)->second);
-            usedSymbols[ENUM_OR_RECORD] = ScopePair(other.usedSymbols.find(ENUM_OR_RECORD)->second);
-            usedSymbols[TYPEDEF] = ScopePair(other.usedSymbols.find(TYPEDEF)->second);
-        }
-
-        ScopePair &operator[](SymbolType tp)
-        {
-            return usedSymbols[tp];
-        }
+        Scope(SourceLocation end) : end(end) {}
+        Scope(SourceLocation end, const Scope &other) : end(end),
+                                                        declarations(other.declarations.maxUsedSymbol),
+                                                        typeNames(other.typeNames.maxUsedSymbol) {};
     };
 
-    vector<Scope> scopes;             // pair of scope and when that scope ends
-    map<void *, int> typedefs;        // for typedef name rewrites
-    map<void *, int> enumsAndRecords; // for enum/(struct/union) name rewrites
-    map<Decl *, int> declarations;    // for variables and functions
+    vector<Scope> scopes;          // pair of scope and when that scope ends
+    map<void *, int> typeNames;    // for enum/(struct/union) name rewrites
+    map<Decl *, int> declarations; // for variables and functions and typedefs
     ASTContext *context;
-    map<SymbolType, map<void *, int> *> tpMap = {
-        {ENUM_OR_RECORD, &enumsAndRecords},
-        {TYPEDEF, &typedefs}};
 
     void adjustScopes(SourceLocation cur)
     {
         // case where cur is in a different translation unit
         // since locations might be in different files, we compare them
         // with something more complicated than cur > scopes.back().end
-        while (!context->getSourceManager().isBeforeInTranslationUnit(cur, scopes.back().end))
+        while (context->getSourceManager().isBeforeInTranslationUnit(scopes.back().end, cur))
         {
             scopes.pop_back();
         }
@@ -193,84 +168,96 @@ public:
         scopes.push_back(Scope(context->getSourceManager().getLocForEndOfFile(mainFileId)));
     };
     /**
-     * @brief Adds a symbol for the declaration to the current scope
+     * @brief Adds a declaration (variable/function/typedef) to the current scope
      *
      * @param decl the declaration. It should be a new declaration not already added with `addSymbol`.
      *       If it already exists in the scope, then its existing symbol is replaced
      * @return string
      */
-    string addSymbol(Decl *decl, SymbolType tp)
+    string addDecl(Decl *decl)
     {
         // first, adjust scopes
         adjustScopes(decl->getLocation());
 
         // store it in declarations
-        Scope::ScopePair &relevant = scopes.back()[tp];
+        Scope::ScopePair &relevant = scopes.back().declarations;
         int symbolNum = relevant.maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front()[tp].externalSymbols); // external symbols only really apply from global scope
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().declarations.externalSymbols); // external symbols only really apply from global scope
         declarations[decl->getCanonicalDecl()] = symbolNum;
         relevant.maxUsedSymbol = nextSymbolNum;
         return str;
     }
-    string addSymbol(SourceLocation location, QualType tp, SymbolType stp)
+    /**
+     * @brief Adds a type (struct name or enum name) to the current scope
+     *
+     * @param location the type's location (used to adjust scopes)
+     * @param tp the type to add
+     * @return string
+     */
+    string addType(SourceLocation location, QualType tp)
     {
         // first, adjust scopes
         adjustScopes(location);
 
         // store it in declarations
-        Scope::ScopePair &relevant = scopes.back()[stp];
+        Scope::ScopePair &relevant = scopes.back().typeNames;
         int symbolNum = relevant.maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front()[stp].externalSymbols); // external symbols only really apply from global scope
-        tpMap[stp]->emplace(tp.getAsOpaquePtr(), symbolNum);
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().typeNames.externalSymbols); // external symbols only really apply from global scope
+        typeNames[tp.getAsOpaquePtr()] = symbolNum;
         relevant.maxUsedSymbol = nextSymbolNum;
         return str;
     }
     /**
-     * @brief Adds a symbol that cannot be rewritten to the current scope
+     * @brief Adds a symbol that cannot be rewritten to the current scope's declarations
      *
      * @param decl the declaration that cannot be rewritten
-     * @param symbol
+     * @param symbol the declaration's name
      */
-    void addExternalSymbol(Decl *decl, string symbol, SymbolType tp)
+    void addExternalDecl(Decl *decl, string symbol)
     {
         // first, adjust scopes
         adjustScopes(decl->getLocation());
 
         // then, add the symbol
-        scopes.back()[tp].externalSymbols.emplace(symbol);
+        scopes.back().declarations.externalSymbols.emplace(symbol);
     }
-    void addExternalSymbol(SourceLocation location, string symbol, SymbolType tp)
+    /**
+     * @brief Adds a symbol that cannot be rewritten to the current scope's types
+     *
+     * @param location the location of the type (for adjusting the scope)
+     * @param symbol the type's name
+     */
+    void addExternalType(SourceLocation location, string symbol)
     {
         // first, adjust scopes
         adjustScopes(location);
 
         // then, add the symbol
-        scopes.back()[tp].externalSymbols.emplace(symbol);
+        scopes.back().typeNames.externalSymbols.emplace(symbol);
     }
     /**
      * @brief Get the abbreviated symbol for the given declaration, or fall
      * back to original
      *
      * @param decl
-     * @param original
      * @return string
      */
-    optional<string> getSymbol(Decl *decl, SymbolType tp)
+    optional<string> getDeclAbbr(Decl *decl)
     {
         if (declarations.find(decl->getCanonicalDecl()) == declarations.end())
         {
             return optional<string>();
         }
         // external symbols only really apply from global scope
-        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front()[tp].externalSymbols).second;
+        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front().declarations.externalSymbols).second;
     }
-    optional<string> getSymbol(QualType tp, SymbolType stp)
+    optional<string> getTypeAbbr(QualType tp)
     {
-        if (tpMap[stp]->find(tp.getAsOpaquePtr()) == tpMap[stp]->end())
+        if (typeNames.find(tp.getAsOpaquePtr()) == typeNames.end())
         {
             return optional<string>();
         }
-        return toSymbol(tpMap[stp]->at(tp.getAsOpaquePtr()), scopes.front()[stp].externalSymbols).second;
+        return toSymbol(typeNames[tp.getAsOpaquePtr()], scopes.front().typeNames.externalSymbols).second;
     }
 
     // enums
@@ -344,13 +331,13 @@ public:
         {
             // register it and replace it
             QualType tp(decl->getTypeForDecl(), 0);
-            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM_OR_RECORD);
+            string replacement = manager.addType(decl->getLocation(), tp);
             cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), replacement)));
         }
         else
         {
-            // register it
-            manager.addExternalSymbol(decl->getLocation(), decl->getNameAsString(), StateManager::ENUM_OR_RECORD);
+            // external enum type name, maybe it affects us, maybe not; either way, register it
+            manager.addExternalType(decl->getLocation(), decl->getNameAsString());
         }
         return true;
     }
@@ -361,12 +348,12 @@ public:
         {
             // need to add this to known declarations
             // and then also replace this
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addDecl(decl))));
         }
         else
         {
-            // external, maybe it affects us, maybe not
-            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
+            // external variable, maybe it affects us, maybe not
+            manager.addExternalDecl(decl, decl->getNameAsString());
         }
         return true;
     }
@@ -379,7 +366,7 @@ public:
         {
             // rewrite record name
             QualType tp(decl->getTypeForDecl(), 0);
-            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM_OR_RECORD);
+            string replacement = manager.addType(decl->getLocation(), tp);
             cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), replacement)));
 
             // push a new scope since the struct is its own scope
@@ -387,8 +374,8 @@ public:
         }
         else
         {
-            // log used struct names
-            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::ENUM_OR_RECORD);
+            // external type that may/may not affects us
+            manager.addExternalType(decl->getLocation(), decl->getNameAsString());
         }
         return true;
     }
@@ -398,7 +385,7 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addDecl(decl))));
         } // can't rewrite code outside of file
         return true;
     }
@@ -409,7 +396,13 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            // TODO - rewrite typedef names
+            // add symbol and rewrite it
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addDecl(decl))));
+        }
+        else
+        {
+            // add external typedef to known symbols
+            manager.addExternalDecl(decl, decl->getNameAsString());
         }
         return true;
     }
@@ -436,7 +429,7 @@ public:
             if (decl->getNameAsString() != "main")
             {
                 // then rewrite this function too
-                cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
+                cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addDecl(decl))));
             }
             // then push a new scope based on current scope
             manager.pushCurScope(decl->getEndLoc());
@@ -444,7 +437,7 @@ public:
         else
         {
             // external, maybe it affects us, maybe not
-            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
+            manager.addExternalDecl(decl, decl->getNameAsString());
             // and also push a new scope
             manager.pushCurScope(decl->getEndLoc());
         }
@@ -457,13 +450,13 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addSymbol(decl, StateManager::VAR_OR_FUNC))));
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), manager.addDecl(decl))));
         }
         else
         {
             // external, but might be an accessible global variable
             // so add it as an external symbol
-            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::VAR_OR_FUNC);
+            manager.addExternalDecl(decl, decl->getNameAsString());
         }
         return true;
     }
@@ -475,7 +468,7 @@ public:
         if (p.second)
         {
             string originalName = expr->getDecl()->getNameAsString();
-            if (optional<string> replacement = manager.getSymbol(expr->getDecl(), StateManager::VAR_OR_FUNC))
+            if (optional<string> replacement = manager.getDeclAbbr(expr->getDecl()))
             {
                 cantFail(replacements->add(Replacement(context->getSourceManager(), p.first, originalName.size(), *replacement)));
             }
@@ -489,7 +482,7 @@ public:
         if (p.second)
         {
             string originalName = expr->getMemberDecl()->getNameAsString();
-            if (optional<string> replacement = manager.getSymbol(expr->getMemberDecl(), StateManager::VAR_OR_FUNC))
+            if (optional<string> replacement = manager.getDeclAbbr(expr->getMemberDecl()))
             {
                 cantFail(replacements->add(Replacement(context->getSourceManager(), expr->getExprLoc(), originalName.size(), *replacement)));
             }
@@ -508,7 +501,7 @@ public:
                 if (d.isFieldDesignator())
                 {
                     StringRef originalName = d.getFieldName()->getName();
-                    if (optional<string> replacement = manager.getSymbol(d.getFieldDecl(), StateManager::VAR_OR_FUNC))
+                    if (optional<string> replacement = manager.getDeclAbbr(d.getFieldDecl()))
                     {
                         cantFail(replacements->add(Replacement(context->getSourceManager(), d.getFieldLoc(), originalName.size(), *replacement)));
                     }
@@ -525,7 +518,7 @@ public:
         {
             string name = loc.getDecl()->getNameAsString();
             // try replacement
-            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM_OR_RECORD))
+            if (optional<string> replacement = manager.getTypeAbbr(loc.getType()))
             {
                 cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
             }
@@ -540,7 +533,22 @@ public:
         {
             string name = loc.getDecl()->getNameAsString();
             // try replacement
-            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM_OR_RECORD))
+            if (optional<string> replacement = manager.getTypeAbbr(loc.getType()))
+            {
+                cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
+            }
+        }
+        return true;
+    }
+
+    // typedef types
+    bool VisitTypedefTypeLoc(TypedefTypeLoc loc)
+    {
+        if (context->getSourceManager().isInMainFile(loc.getBeginLoc()))
+        {
+            string name = loc.getTypedefNameDecl()->getNameAsString();
+            // try replacement
+            if (optional<string> replacement = manager.getDeclAbbr(loc.getTypedefNameDecl()))
             {
                 cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
             }
