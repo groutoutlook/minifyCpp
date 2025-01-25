@@ -46,7 +46,7 @@ if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 endif()
 
 # actual applications
-add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)
+add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp src/actions/PPSymbolsAction.cpp)
 
 # package
 set(LLVMDEP "libllvm${LLVMVersion}")

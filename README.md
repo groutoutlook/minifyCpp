@@ -173,4 +173,3 @@ Finally, we do a pass over the tokens to remove spaces where applicable.
 
 - minify-C is meant for minimizing a single source C file. It will not work with C++.
 - While minify-C can properly handle includes, there is currently no support for multi-file minimization.
-- If you define macros in your main file, minify-C may not work properly (try examples/macros/main.c to see why)

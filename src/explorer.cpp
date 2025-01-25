@@ -261,6 +261,20 @@ public:
     }
 };
 
+class ExplorerPPCallbacks : public PPCallbacks
+{
+private:
+    shared_ptr<vector<StringRef>> definitions;
+
+public:
+    ExplorerPPCallbacks(const shared_ptr<vector<StringRef>> &definitions) : definitions(definitions) {};
+    virtual void MacroDefined(const Token &macroNameTok, const MacroDirective *MD) override
+    {
+        StringRef name = macroNameTok.getIdentifierInfo()->getName();
+        definitions->push_back(name);
+    }
+};
+
 class ExplorerAction : public clang::ASTFrontendAction
 {
 public:
@@ -269,6 +283,8 @@ public:
                       llvm::StringRef inFile) override
     {
         outs() << "Processing " << inFile << "\n";
+        shared_ptr<vector<StringRef>> definitions = make_shared<vector<StringRef>>();
+        compiler.getPreprocessor().addPPCallbacks(make_unique<ExplorerPPCallbacks>(definitions));
         return std::make_unique<FindNamedClassConsumer>(&compiler.getASTContext(),
                                                         inFile.str());
     }

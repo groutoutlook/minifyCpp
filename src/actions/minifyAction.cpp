@@ -64,7 +64,7 @@ const set<string> keywords = {
  * @param i the current number requested
  * @return pair<int, string> a pair containing (nextNumber, identifier)
  */
-pair<int, string> toSymbol(int i, set<string> &reserved)
+pair<int, string> toSymbol(int i, const set<string> &reserved, set<string> *defines)
 {
     int curNum = i;
     string result;
@@ -91,7 +91,7 @@ pair<int, string> toSymbol(int i, set<string> &reserved)
         ++curNum;
 
         // keep going while this is a keyword or reserved identifier
-    } while (keywords.find(result) != keywords.end() || reserved.find(result) != reserved.end());
+    } while (keywords.find(result) != keywords.end() || reserved.find(result) != reserved.end() || defines->find(result) != defines->end());
     return {curNum, result};
 }
 
@@ -132,6 +132,7 @@ private:
     vector<Scope> scopes;          // pair of scope and when that scope ends
     map<void *, int> typeNames;    // for enum/(struct/union) name rewrites
     map<Decl *, int> declarations; // for variables and functions and typedefs
+    set<string> *definitions;      // for reserved macro-defined identifiers
     ASTContext *context;
 
     void adjustScopes(SourceLocation cur)
@@ -161,7 +162,7 @@ public:
      * scopes in the scope stack.
      * @param context the ASTContext to use with this StateManager
      */
-    StateManager(ASTContext *context) : context(context)
+    StateManager(set<string> *definitions, ASTContext *context) : definitions(definitions), context(context)
     {
         // start with a global scope
         FileID mainFileId = context->getSourceManager().getMainFileID();
@@ -182,7 +183,7 @@ public:
         // store it in declarations
         Scope::ScopePair &relevant = scopes.back().declarations;
         int symbolNum = relevant.maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().declarations.externalSymbols); // external symbols only really apply from global scope
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().declarations.externalSymbols, definitions); // external symbols only really apply from global scope
         declarations[decl->getCanonicalDecl()] = symbolNum;
         relevant.maxUsedSymbol = nextSymbolNum;
         return str;
@@ -202,7 +203,7 @@ public:
         // store it in declarations
         Scope::ScopePair &relevant = scopes.back().typeNames;
         int symbolNum = relevant.maxUsedSymbol;
-        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().typeNames.externalSymbols); // external symbols only really apply from global scope
+        auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().typeNames.externalSymbols, definitions); // external symbols only really apply from global scope
         typeNames[tp.getAsOpaquePtr()] = symbolNum;
         relevant.maxUsedSymbol = nextSymbolNum;
         return str;
@@ -249,7 +250,7 @@ public:
             return optional<string>();
         }
         // external symbols only really apply from global scope
-        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front().declarations.externalSymbols).second;
+        return toSymbol(declarations[decl->getCanonicalDecl()], scopes.front().declarations.externalSymbols, definitions).second;
     }
     optional<string> getTypeAbbr(QualType tp)
     {
@@ -257,7 +258,7 @@ public:
         {
             return optional<string>();
         }
-        return toSymbol(typeNames[tp.getAsOpaquePtr()], scopes.front().typeNames.externalSymbols).second;
+        return toSymbol(typeNames[tp.getAsOpaquePtr()], scopes.front().typeNames.externalSymbols, definitions).second;
     }
 
     // enums
@@ -307,8 +308,8 @@ private:
     StateManager manager;
 
 public:
-    explicit MinifierVisitor(Replacements *r, ASTContext *context, string sourceFileName)
-        : replacements(r), context(context), sourceFileName(sourceFileName), manager(context) {}
+    explicit MinifierVisitor(set<string> *definitions, Replacements *r, ASTContext *context, string sourceFileName)
+        : replacements(r), context(context), sourceFileName(sourceFileName), manager(definitions, context) {}
 
     template <typename T>
     pair<SourceLocation, bool> getLoc(T *decl)
@@ -563,35 +564,36 @@ private:
     MinifierVisitor visitor;
 
 public:
-    explicit MinifierConsumer(Replacements *r, ASTContext *context, string sourceFileName)
-        : visitor(r, context, sourceFileName) {}
+    explicit MinifierConsumer(set<string> *definitions, Replacements *r, ASTContext *context, string sourceFileName)
+        : visitor(definitions, r, context, sourceFileName) {}
 
     virtual void HandleTranslationUnit(clang::ASTContext &context) override
     {
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 };
-MinifierAction::MinifierAction(Replacements *replacements) : replacements(replacements) {};
+MinifierAction::MinifierAction(Replacements *replacements, set<string> *definitions) : replacements(replacements), definitions(definitions) {};
 std::unique_ptr<clang::ASTConsumer>
 MinifierAction::CreateASTConsumer(clang::CompilerInstance &compiler,
                                   llvm::StringRef inFile)
 {
     return std::make_unique<MinifierConsumer>(
-        replacements, &compiler.getASTContext(),
+        definitions, replacements, &compiler.getASTContext(),
         inFile.str());
 }
 
-std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements)
+std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements, set<string> *definitions)
 {
     class MinifierActionFactory : public FrontendActionFactory
     {
     public:
         Replacements *replacements;
-        MinifierActionFactory(Replacements *rs) : replacements(rs) {};
+        set<string> *definitions;
+        MinifierActionFactory(Replacements *rs, set<string> *definitions) : replacements(rs), definitions(definitions) {};
         std::unique_ptr<FrontendAction> create() override
         {
-            return std::make_unique<MinifierAction>(replacements);
+            return std::make_unique<MinifierAction>(replacements, definitions);
         }
     };
-    return std::make_unique<MinifierActionFactory>(replacements);
+    return std::make_unique<MinifierActionFactory>(replacements, definitions);
 }

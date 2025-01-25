@@ -1,4 +1,5 @@
 #include <actions/minifyAction.hpp>
+#include <actions/PPSymbolsAction.hpp>
 #include <format/minifyFormat.hpp>
 #include <llvm/Support/CommandLine.h>
 #include <clang/Tooling/CompilationDatabase.h>
@@ -90,7 +91,11 @@ int main(int argc, const char **argv)
     }
     Replacements replacements;
     ClangTool tool(*compDB, {fileName}, make_shared<PCHContainerOperations>(), fs);
-    if (tool.run(MinifierAction::newMinifierAction(&replacements).get()))
+    // first, get existing preprocessor defines
+    set<string> definitions;
+    tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
+    // then run the minify tool
+    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
     {
         // error while running the tool
         return 4;
