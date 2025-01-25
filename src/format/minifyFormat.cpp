@@ -90,15 +90,11 @@ Replacements MinifyFormatter::process()
     // is a punctuator
     // otherwise, a single space
     Token tok;
+    lexer.LexFromRawLexer(tok); // take first token into tok
     LastTokenType lastTokenType = BOF;
     SourceLocation prevLocation = sm.getLocForStartOfFile(sm.getMainFileID());
-    bool didSkip = false; // in case we had to skip a macro area
-    // lexer.LexFromRawLexer returns false if still good
-    while (didSkip || (!lexer.LexFromRawLexer(tok) && !tok.is(tok::eof)))
+    while (!tok.is(tok::eof))
     {
-        // reset this
-        didSkip = false;
-
         // get info on cur token
         LastTokenType curTokenType = getTokenType(tok);
 
@@ -129,18 +125,26 @@ Replacements MinifyFormatter::process()
         // if it was a preprocessor, skip till the end of the preprocessor
         if (tok.is(tok::hash))
         {
-            while (!lexer.LexFromRawLexer(tok) && !tok.isAtStartOfLine())
+            lexer.LexFromRawLexer(tok);
+            while (!tok.isAtStartOfLine() && !tok.is(tok::eof))
             {
                 // update last location
                 prevLocation = tok.getEndLoc();
+                lexer.LexFromRawLexer(tok);
             }
-            didSkip = true;
         }
         else // if didn't skip, it's ok to use the value of tok here
         {
             prevLocation = tok.getEndLoc();
+            lexer.LexFromRawLexer(tok);
         }
         lastTokenType = curTokenType;
     }
+    // replace any whitespace between eof token and last token with empty
+    SourceLocation replacementStart = prevLocation;
+    SourceLocation replacementEnd = tok.getLocation();
+    const CharSourceRange &range = CharSourceRange::getCharRange(SourceRange(replacementStart, replacementEnd));
+    llvm::cantFail(result.add(Replacement(sm, range, "")));
+
     return result;
 }
