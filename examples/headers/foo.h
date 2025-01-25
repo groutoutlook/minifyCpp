@@ -8,6 +8,9 @@ struct foostruct
     } b;
     struct barstruct *c;
 };
+struct a
+{
+};
 
 int sum(struct foostruct *f);
 

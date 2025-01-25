@@ -8,6 +8,29 @@ struct myStruct
     int val2;
     int *ptr;
 };
+struct myOtherStruct
+{
+    int val1;
+};
+struct myThirdStruct
+{
+    int val2;
+};
+enum myFirstEnum
+{
+    YES,
+    NO
+};
+enum mySecondEnum
+{
+    WOOH,
+    NAAAH
+};
+enum lastEnum
+{
+    NOOOOO,
+    WOOOOOOH
+};
 
 void printMyStruct(struct myStruct *pointer)
 {

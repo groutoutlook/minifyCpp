@@ -105,8 +105,8 @@ public:
     enum SymbolType
     {
         VAR_OR_FUNC = 0,
-        ENUM,
-        STRUCT,
+        ENUM_OR_RECORD,
+        TYPEDEF, // TODO - start this
     };
 
 private:
@@ -134,11 +134,14 @@ private:
         Scope(SourceLocation end) : end(end)
         {
             usedSymbols[VAR_OR_FUNC] = ScopePair{};
-            usedSymbols[ENUM] = ScopePair{};
+            usedSymbols[ENUM_OR_RECORD] = ScopePair{};
+            usedSymbols[TYPEDEF] = ScopePair{}; // TODO - use this
         }
         Scope(SourceLocation end, const Scope &other) : end(end)
         {
             usedSymbols[VAR_OR_FUNC] = ScopePair(other.usedSymbols.find(VAR_OR_FUNC)->second);
+            usedSymbols[ENUM_OR_RECORD] = ScopePair(other.usedSymbols.find(ENUM_OR_RECORD)->second);
+            usedSymbols[TYPEDEF] = ScopePair(other.usedSymbols.find(TYPEDEF)->second);
         }
 
         ScopePair &operator[](SymbolType tp)
@@ -147,12 +150,14 @@ private:
         }
     };
 
-    vector<Scope> scopes;            // pair of scope and when that scope ends
-    map<QualType, int> recordNames;  // for struct/union name rewrites
-    map<QualType, int> typedefNames; // for typedef name rewrites
-    map<void *, int> enums;          // for enum name rewrites
-    map<Decl *, int> declarations;   // for variables and functions
+    vector<Scope> scopes;             // pair of scope and when that scope ends
+    map<void *, int> typedefs;        // for typedef name rewrites
+    map<void *, int> enumsAndRecords; // for enum/(struct/union) name rewrites
+    map<Decl *, int> declarations;    // for variables and functions
     ASTContext *context;
+    map<SymbolType, map<void *, int> *> tpMap = {
+        {ENUM_OR_RECORD, &enumsAndRecords},
+        {TYPEDEF, &typedefs}};
 
     void adjustScopes(SourceLocation cur)
     {
@@ -216,14 +221,7 @@ public:
         Scope::ScopePair &relevant = scopes.back()[stp];
         int symbolNum = relevant.maxUsedSymbol;
         auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front()[stp].externalSymbols); // external symbols only really apply from global scope
-        if (stp == ENUM)
-        {
-            enums[tp.getAsOpaquePtr()] = symbolNum;
-        }
-        else
-        {
-            errs() << "UNSUPPORTED AS OF NOW\n"; // TODO
-        }
+        tpMap[stp]->emplace(tp.getAsOpaquePtr(), symbolNum);
         relevant.maxUsedSymbol = nextSymbolNum;
         return str;
     }
@@ -259,7 +257,6 @@ public:
      */
     optional<string> getSymbol(Decl *decl, SymbolType tp)
     {
-        // TODO - use different maps for var_or_func vs enum
         if (declarations.find(decl->getCanonicalDecl()) == declarations.end())
         {
             return optional<string>();
@@ -269,11 +266,11 @@ public:
     }
     optional<string> getSymbol(QualType tp, SymbolType stp)
     {
-        if (stp == ENUM && enums.find(tp.getAsOpaquePtr()) == enums.end())
+        if (tpMap[stp]->find(tp.getAsOpaquePtr()) == tpMap[stp]->end())
         {
             return optional<string>();
         }
-        return toSymbol(enums[tp.getAsOpaquePtr()], scopes.front()[stp].externalSymbols).second;
+        return toSymbol(tpMap[stp]->at(tp.getAsOpaquePtr()), scopes.front()[stp].externalSymbols).second;
     }
 
     // enums
@@ -347,13 +344,13 @@ public:
         {
             // register it and replace it
             QualType tp(decl->getTypeForDecl(), 0);
-            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM);
+            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM_OR_RECORD);
             cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), replacement)));
         }
         else
         {
             // register it
-            manager.addExternalSymbol(decl->getLocation(), decl->getNameAsString(), StateManager::ENUM);
+            manager.addExternalSymbol(decl->getLocation(), decl->getNameAsString(), StateManager::ENUM_OR_RECORD);
         }
         return true;
     }
@@ -380,13 +377,18 @@ public:
         pair<SourceLocation, bool> p = getLoc(decl);
         if (p.second)
         {
-            // TODO - rewrite record names
+            // rewrite record name
+            QualType tp(decl->getTypeForDecl(), 0);
+            string replacement = manager.addSymbol(decl->getLocation(), tp, StateManager::ENUM_OR_RECORD);
+            cantFail(replacements->add(Replacement(context->getSourceManager(), decl->getLocation(), decl->getNameAsString().size(), replacement)));
+
             // push a new scope since the struct is its own scope
             manager.pushEmptyScope(decl->getEndLoc());
         }
         else
         {
-            // TODO - log used struct names
+            // log used struct names
+            manager.addExternalSymbol(decl, decl->getNameAsString(), StateManager::ENUM_OR_RECORD);
         }
         return true;
     }
@@ -523,7 +525,22 @@ public:
         {
             string name = loc.getDecl()->getNameAsString();
             // try replacement
-            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM))
+            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM_OR_RECORD))
+            {
+                cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
+            }
+        }
+        return true;
+    }
+
+    // record types
+    bool VisitRecordTypeLoc(RecordTypeLoc loc)
+    {
+        if (context->getSourceManager().isInMainFile(loc.getBeginLoc()))
+        {
+            string name = loc.getDecl()->getNameAsString();
+            // try replacement
+            if (optional<string> replacement = manager.getSymbol(loc.getType(), StateManager::ENUM_OR_RECORD))
             {
                 cantFail(replacements->add(Replacement(context->getSourceManager(), loc.getBeginLoc(), name.size(), *replacement)));
             }
