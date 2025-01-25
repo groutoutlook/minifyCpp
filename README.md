@@ -125,7 +125,12 @@ cmake .. -DCMAKE_BUILD_TYPE=MinSizeRel -DLLVMVersion=17
 cmake --build .
 ```
 
-After running the above, there should be an executable `minifier` in the `build` directory
+After running the above, there should be an executable `minifier` in the `build` directory.
+
+If you only want to run the executable, the runtime dependencies can all be installed by installing
+the following package:
+
+- libllvm17
 
 ## Building/Running with Docker
 
