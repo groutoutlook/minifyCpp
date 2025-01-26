@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(GolfC VERSION 1.1.0)
+project(GolfC VERSION 1.1.1)
 
 # configuration
 set(LLVMVersion "17" CACHE STRING "Which LLVM and Clang version to use")
@@ -46,7 +46,7 @@ if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
 endif()
 
 # actual applications
-add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp)
+add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp src/actions/PPSymbolsAction.cpp)
 
 # package
 set(LLVMDEP "libllvm${LLVMVersion}")

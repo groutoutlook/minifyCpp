@@ -1,12 +1,14 @@
 #include <format/minifyFormat.hpp>
+#include <deque>
 using namespace clang;
 using namespace clang::tooling;
+using namespace llvm;
+using namespace std;
 MinifyFormatter::MinifyFormatter(SourceManager &sm) : sm(sm) {}
 
 enum LastTokenType
 {
     punctuator = 0, // if last token was a punctuator
-    preprocessor,   // if last token was part of a preprocessor action
     BOF,            // if it's the beginning of the file
     other,          // other cases
 };
@@ -65,11 +67,7 @@ bool isPunctuator(const Token &t)
 }
 LastTokenType getTokenType(const Token &t)
 {
-    if (t.is(tok::hash))
-    {
-        return preprocessor;
-    }
-    else if (isPunctuator(t))
+    if (isPunctuator(t))
     {
         return punctuator;
     }
@@ -93,10 +91,14 @@ Replacements MinifyFormatter::process()
     lexer.LexFromRawLexer(tok); // take first token into tok
     LastTokenType lastTokenType = BOF;
     SourceLocation prevLocation = sm.getLocForStartOfFile(sm.getMainFileID());
+    deque<Token> prevTokens;
+
+    bool wasPP = false; // true if last thing was from a preprocessor
     while (!tok.is(tok::eof))
     {
         // get info on cur token
         LastTokenType curTokenType = getTokenType(tok);
+        bool isFirstPP = tok.is(tok::hash) && tok.isAtStartOfLine();
 
         // replace spaces between this token and the previous token
         SourceLocation replacementStart = prevLocation;
@@ -104,47 +106,67 @@ Replacements MinifyFormatter::process()
         const CharSourceRange &range = CharSourceRange::getCharRange(SourceRange(replacementStart, replacementEnd));
         if (lastTokenType == BOF)
         {
+            // no spaces between start of file and first token
+            cantFail(result.add(Replacement(sm, range, "")));
         }
-        else if (lastTokenType == preprocessor || curTokenType == preprocessor)
+        else if (isFirstPP || (wasPP && tok.isAtStartOfLine()))
         {
+            if (wasPP && tok.isAtStartOfLine())
+            {
+                wasPP = false;
+            }
             // need a newline between prev location and this location
-            llvm::cantFail(result.add(Replacement(sm, range, "\n")));
+            cantFail(result.add(Replacement(sm, range, "\n")));
         }
         else if (lastTokenType == punctuator || curTokenType == punctuator)
         {
-            // no spaces between punctuators and things
-            llvm::cantFail(result.add(Replacement(sm, range, "")));
+            // currently in a preprocessor, so need to be careful about moving
+            // punctuators here
+            // specifically, if the past 3 tokens are
+            // '#', 'define', and (some identifier), then that means that
+            // this is a define and we adjust space to either 1 space or none,
+            // depending on whether there's a space already or not
+            if (wasPP && prevTokens.size() == 3 &&
+                prevTokens.front().isAtStartOfLine() && prevTokens.front().is(tok::hash) &&              // first was hash
+                prevTokens[1].is(tok::raw_identifier) && prevTokens[1].getRawIdentifier() == "define" && // then define
+                prevTokens[2].is(tok::raw_identifier) &&                                                 // then some identifier (followed by this token, a punctuator)
+                replacementStart != replacementEnd)                                                      // there's some space between the defined thing and this punctuator
+            {
+                // then basically there's some amount of whitespace in between
+                // we just replace that x amount of whitespaces with 1 single whitespace
+                cantFail(result.add(Replacement(sm, range, " ")));
+            }
+            else
+            {
+                // normally, no spaces between punctuators and things
+                cantFail(result.add(Replacement(sm, range, "")));
+            }
         }
         else if (lastTokenType == other)
         {
             // both this and the previous are some sort of raw-identifiers
             // so use a space
-            llvm::cantFail(result.add(Replacement(sm, range, " ")));
+            cantFail(result.add(Replacement(sm, range, " ")));
         }
 
-        // if it was a preprocessor, skip till the end of the preprocessor
-        if (tok.is(tok::hash))
+        // adjust deque
+        prevTokens.push_back(tok);
+        while (prevTokens.size() > 3)
         {
-            lexer.LexFromRawLexer(tok);
-            while (!tok.isAtStartOfLine() && !tok.is(tok::eof))
-            {
-                // update last location
-                prevLocation = tok.getEndLoc();
-                lexer.LexFromRawLexer(tok);
-            }
+            prevTokens.pop_front();
         }
-        else // if didn't skip, it's ok to use the value of tok here
-        {
-            prevLocation = tok.getEndLoc();
-            lexer.LexFromRawLexer(tok);
-        }
+
+        // advance to next token
+        prevLocation = tok.getEndLoc();
+        lexer.LexFromRawLexer(tok);
         lastTokenType = curTokenType;
+        wasPP = wasPP || isFirstPP;
     }
     // replace any whitespace between eof token and last token with empty
     SourceLocation replacementStart = prevLocation;
     SourceLocation replacementEnd = tok.getLocation();
     const CharSourceRange &range = CharSourceRange::getCharRange(SourceRange(replacementStart, replacementEnd));
-    llvm::cantFail(result.add(Replacement(sm, range, "")));
+    cantFail(result.add(Replacement(sm, range, "")));
 
     return result;
 }
