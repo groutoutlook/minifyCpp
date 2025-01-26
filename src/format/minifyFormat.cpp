@@ -1,6 +1,9 @@
 #include <format/minifyFormat.hpp>
+#include <deque>
 using namespace clang;
 using namespace clang::tooling;
+using namespace llvm;
+using namespace std;
 MinifyFormatter::MinifyFormatter(SourceManager &sm) : sm(sm) {}
 
 enum LastTokenType
@@ -88,6 +91,8 @@ Replacements MinifyFormatter::process()
     lexer.LexFromRawLexer(tok); // take first token into tok
     LastTokenType lastTokenType = BOF;
     SourceLocation prevLocation = sm.getLocForStartOfFile(sm.getMainFileID());
+    deque<Token> prevTokens;
+
     bool wasPP = false; // true if last thing was from a preprocessor
     while (!tok.is(tok::eof))
     {
@@ -102,7 +107,7 @@ Replacements MinifyFormatter::process()
         if (lastTokenType == BOF)
         {
             // no spaces between start of file and first token
-            llvm::cantFail(result.add(Replacement(sm, range, "")));
+            cantFail(result.add(Replacement(sm, range, "")));
         }
         else if (isFirstPP || (wasPP && tok.isAtStartOfLine()))
         {
@@ -111,21 +116,47 @@ Replacements MinifyFormatter::process()
                 wasPP = false;
             }
             // need a newline between prev location and this location
-            llvm::cantFail(result.add(Replacement(sm, range, "\n")));
+            cantFail(result.add(Replacement(sm, range, "\n")));
         }
         else if (lastTokenType == punctuator || curTokenType == punctuator)
         {
-            // no spaces between punctuators and things
-            // TODO - deal with warning "ISO C99 requires whitespace after the macro name"
-            llvm::cantFail(result.add(Replacement(sm, range, "")));
+            // currently in a preprocessor, so need to be careful about moving
+            // punctuators here
+            // specifically, if the past 3 tokens are
+            // '#', 'define', and (some identifier), then that means that
+            // this is a define and we adjust space to either 1 space or none,
+            // depending on whether there's a space already or not
+            if (wasPP && prevTokens.size() == 3 &&
+                prevTokens.front().isAtStartOfLine() && prevTokens.front().is(tok::hash) &&              // first was hash
+                prevTokens[1].is(tok::raw_identifier) && prevTokens[1].getRawIdentifier() == "define" && // then define
+                prevTokens[2].is(tok::raw_identifier) &&                                                 // then some identifier (followed by this token, a punctuator)
+                replacementStart != replacementEnd)                                                      // there's some space between the defined thing and this punctuator
+            {
+                // then basically there's some amount of whitespace in between
+                // we just replace that x amount of whitespaces with 1 single whitespace
+                cantFail(result.add(Replacement(sm, range, " ")));
+            }
+            else
+            {
+                // normally, no spaces between punctuators and things
+                cantFail(result.add(Replacement(sm, range, "")));
+            }
         }
         else if (lastTokenType == other)
         {
             // both this and the previous are some sort of raw-identifiers
             // so use a space
-            llvm::cantFail(result.add(Replacement(sm, range, " ")));
+            cantFail(result.add(Replacement(sm, range, " ")));
         }
 
+        // adjust deque
+        prevTokens.push_back(tok);
+        while (prevTokens.size() > 3)
+        {
+            prevTokens.pop_front();
+        }
+
+        // advance to next token
         prevLocation = tok.getEndLoc();
         lexer.LexFromRawLexer(tok);
         lastTokenType = curTokenType;
@@ -135,7 +166,7 @@ Replacements MinifyFormatter::process()
     SourceLocation replacementStart = prevLocation;
     SourceLocation replacementEnd = tok.getLocation();
     const CharSourceRange &range = CharSourceRange::getCharRange(SourceRange(replacementStart, replacementEnd));
-    llvm::cantFail(result.add(Replacement(sm, range, "")));
+    cantFail(result.add(Replacement(sm, range, "")));
 
     return result;
 }

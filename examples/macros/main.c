@@ -2,9 +2,15 @@
 #define a 324
 #define f(a) printf( \
     "hi %s\n", #a)
+#define g (a)
+void print_int(int num)
+{
+    printf("Got int %d\n", num);
+}
 int main()
 {
     int b = 3; // this is a comment
+    print_int g;
 #define d
     printf("a+b = %d\n", a + b);
     for (int i = 0; i < 10; ++i)
