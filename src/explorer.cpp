@@ -5,6 +5,7 @@
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <clang/Lex/MacroArgs.h>
 #include <llvm/Support/CommandLine.h>
 #include <fstream>
 #include <iostream>
@@ -264,14 +265,42 @@ public:
 class ExplorerPPCallbacks : public PPCallbacks
 {
 private:
-    shared_ptr<vector<StringRef>> definitions;
+    SourceManager &manager;
 
 public:
-    ExplorerPPCallbacks(const shared_ptr<vector<StringRef>> &definitions) : definitions(definitions) {};
+    ExplorerPPCallbacks(SourceManager &manager) : manager(manager) {};
     virtual void MacroDefined(const Token &macroNameTok, const MacroDirective *MD) override
     {
-        StringRef name = macroNameTok.getIdentifierInfo()->getName();
-        definitions->push_back(name);
+        if (MD->getMacroInfo()->isFunctionLike())
+        {
+            outs() << "function macro: ";
+        }
+        else
+        {
+            outs() << "regular macro: ";
+        }
+        outs() << "macro definition  " << macroNameTok.getIdentifierInfo()->getName() << " defined from ";
+        MD->getMacroInfo()->getDefinitionLoc().dump(manager);
+        outs() << "to ";
+        MD->getMacroInfo()->getDefinitionEndLoc().dump(manager);
+    }
+
+    virtual void MacroExpands(const Token &MacroNameTok,
+                              const MacroDefinition &MD, SourceRange Range,
+                              const MacroArgs *Args)
+    {
+        outs() << "Got macro expansion for " << MacroNameTok.getIdentifierInfo()->getName() << " at ";
+        Range.getBegin().dump(manager);
+        outs() << "to ";
+        Range.getEnd().dump(manager);
+        if (Args != nullptr)
+        {
+            outs() << "nonnull args: ";
+        }
+        else
+        {
+            outs() << "null args\n";
+        }
     }
 };
 
@@ -283,8 +312,15 @@ public:
                       llvm::StringRef inFile) override
     {
         outs() << "Processing " << inFile << "\n";
-        shared_ptr<vector<StringRef>> definitions = make_shared<vector<StringRef>>();
-        compiler.getPreprocessor().addPPCallbacks(make_unique<ExplorerPPCallbacks>(definitions));
+        compiler.getPreprocessor().addPPCallbacks(make_unique<ExplorerPPCallbacks>(compiler.getSourceManager()));
+        for (const auto &item : compiler.getHeaderSearchOpts().UserEntries)
+        {
+            outs() << "have item " << item.Path << " " << item.IgnoreSysRoot << " " << item.Group << " " << item.IsFramework << "\n";
+        }
+        for (const auto &item : compiler.getFrontendOpts().Inputs)
+        {
+            outs() << "have frontend item " << item.getFile() << " " << item.isHeader() << " " << item.isFile() << " " << item.isSystem() << "\n";
+        }
         return std::make_unique<FindNamedClassConsumer>(&compiler.getASTContext(),
                                                         inFile.str());
     }

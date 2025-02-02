@@ -1,4 +1,6 @@
+#include <fcntl.h>
 #include <stdio.h>
+#include <unistd.h>
 #define a 324
 #define f(a) printf( \
     "hi %s\n", #a)
@@ -10,6 +12,12 @@ void print_int(int num)
 int main()
 {
     int b = 3; // this is a comment
+#ifdef O_APPEND
+    int f = O_APPEND;
+#else
+    int gf = 31;
+#endif
+
     print_int g;
 #define d
     printf("a+b = %d\n", a + b);

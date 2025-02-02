@@ -1,3 +1,4 @@
+#include <actions/expandMacroAction.hpp>
 #include <actions/minifyAction.hpp>
 #include <actions/PPSymbolsAction.hpp>
 #include <format/minifyFormat.hpp>
@@ -7,6 +8,8 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <thread>
 using namespace std;
 using namespace clang;
 using namespace clang::tooling;
@@ -74,14 +77,14 @@ int main(int argc, const char **argv)
     DiagnosticsEngine diagnostics(
         IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
     SourceManager sm(diagnostics, *fileManagerPtr);
-    if (fromSTDIN)
-    {
-        fileName = "/tmp/golfC-Minifier.c";
-        error_code ignored;
-        raw_fd_ostream tmpFileWriter(fileName, ignored);
-        tmpFileWriter << code->getBuffer();
-        tmpFileWriter.close();
-    }
+    const string tempFileName = "/tmp/golfC-Minifier.c";
+    error_code ignored;
+    raw_fd_ostream tmpFileWriter(tempFileName, ignored);
+    tmpFileWriter << code->getBuffer();
+    tmpFileWriter.close();
+
+    // set main file, create rewriter
+    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(tempFileName), SrcMgr::C_User));
 
     // apply minify action
     if (compDB == nullptr)
@@ -90,48 +93,71 @@ int main(int argc, const char **argv)
         return 3;
     }
     Replacements replacements;
-    ClangTool tool(*compDB, {fileName}, make_shared<PCHContainerOperations>(), fs);
+    ClangTool tool(*compDB, {tempFileName}, make_shared<PCHContainerOperations>(), fs);
     // first, get existing preprocessor defines
     set<string> definitions;
     tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
-    // then run the minify tool
-    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
-    {
-        // error while running the tool
-        return 4;
-    }
 
-    // apply those rewrites
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(fileName), SrcMgr::C_User));
+    // next up, expand macros and save the results
+    tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
     Rewriter rewriter(sm, LangOptions());
-    if (!applyAllReplacements(replacements, rewriter))
+    if (!applyAllReplacements(replacements, rewriter) ||
+        rewriter.overwriteChangedFiles())
     {
-        errs() << "Failed to apply minify action rewrites!\n";
+        errs() << "Failed to apply expand action rewrites!\n";
         return 5;
     }
+
+    errs() << "made changes right now, wait for more...\n";
+    std::this_thread::sleep_for(std::chrono::seconds(15));
+    errs() << "going on\n";
+
+    // then run the minify tool
+    // replacements = Replacements{};
+    // if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
+    //{
+    //    // error while running the tool
+    //    return 4;
+    //}
+
+    // apply those rewrites
+    // rewriter = Rewriter(sm, LangOptions());
+    // if (!applyAllReplacements(replacements, rewriter) || rewriter.overwriteChangedFiles())
+    //{
+    //    errs() << "Failed to apply minify action rewrites!\n";
+    //    return 5;
+    //}
 
     // format
     MinifyFormatter formatter(sm);
     replacements = formatter.process();
 
     // save format replacements too
-    if (!applyAllReplacements(replacements, rewriter))
+    rewriter = Rewriter(sm, LangOptions());
+    if (!applyAllReplacements(replacements, rewriter) || rewriter.overwriteChangedFiles())
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
         return 6;
     }
 
     // output
-    RewriteBuffer &buffer = rewriter.getEditBuffer(sm.getMainFileID());
+    ErrorOr<unique_ptr<MemoryBuffer>> outputOrErr = MemoryBuffer::getFileAsStream(tempFileName);
+    unique_ptr<MemoryBuffer> finalOutput;
+    if (std::error_code ec = outputOrErr.getError())
+    {
+        errs() << "failed to get final output:" << ec.message() << "\n";
+        return 4;
+    }
+    finalOutput = std::move(outputOrErr.get());
     if (inPlace.getValue() && !fromSTDIN)
     {
         error_code ec;
         raw_fd_ostream out(fileName, ec);
-        buffer.write(out);
+        out << finalOutput->getBuffer();
         out.close();
     }
     else
     {
-        buffer.write(outs());
+        outs() << finalOutput->getBuffer();
     }
 }

@@ -43,10 +43,18 @@ endmacro(add_tooling_executable)
 # debug executable, for development
 if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   add_tooling_executable(explorer src/explorer.cpp)
+  add_tooling_executable(ciexplorer src/ciexplorer.cpp)
 endif()
 
 # actual applications
-add_tooling_executable(minifier src/main.cpp src/format/minifyFormat.cpp src/actions/minifyAction.cpp src/actions/PPSymbolsAction.cpp)
+add_tooling_executable(
+  minifier
+  src/main.cpp
+  src/format/minifyFormat.cpp
+  src/actions/minifyAction.cpp
+  src/actions/PPSymbolsAction.cpp
+  src/actions/expandMacroAction.cpp
+)
 
 # package
 set(LLVMDEP "libllvm${LLVMVersion}")
