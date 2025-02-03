@@ -24,6 +24,10 @@ static cl::opt<bool> inPlace(
     "i",
     cl::desc("Whether to process the file in place, only works if [source] is specified"),
     cl::value_desc("inplace"), cl::init(false), cl::cat(options));
+static cl::opt<bool> expandAll(
+    "ea",
+    cl::desc("Whether to expand all macros encountered in the source file"),
+    cl::value_desc("expandAll"), cl::init(false), cl::cat(options));
 static cl::list<std::string> ArgsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
@@ -135,11 +139,14 @@ int main(int argc, const char **argv)
     tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
 
     // next up, expand macros and save the results
-    tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
-    if (!updateMainFileContents(sm, replacements))
+    if (expandAll.getValue())
     {
-        errs() << "Failed to apply expand macros action\n";
-        return 4;
+        tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
+        if (!updateMainFileContents(sm, replacements))
+        {
+            errs() << "Failed to apply expand macros action\n";
+            return 4;
+        }
     }
 
     // then run the minify tool
