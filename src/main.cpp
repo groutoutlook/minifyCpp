@@ -1,3 +1,4 @@
+#include <actions/expandMacroAction.hpp>
 #include <actions/minifyAction.hpp>
 #include <actions/PPSymbolsAction.hpp>
 #include <format/minifyFormat.hpp>
@@ -7,6 +8,8 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <thread>
 using namespace std;
 using namespace clang;
 using namespace clang::tooling;
@@ -21,10 +24,49 @@ static cl::opt<bool> inPlace(
     "i",
     cl::desc("Whether to process the file in place, only works if [source] is specified"),
     cl::value_desc("inplace"), cl::init(false), cl::cat(options));
+static cl::opt<bool> expandAll(
+    "ea",
+    cl::desc("Whether to expand all macros encountered in the source file"),
+    cl::value_desc("expandAll"), cl::init(false), cl::cat(options));
 static cl::list<std::string> ArgsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
     cl::sub(cl::SubCommand::getAll()), cl::cat(options));
+
+bool writeToFile(const StringRef fileName, const StringRef code)
+{
+    error_code ec;
+    raw_fd_ostream out(fileName, ec);
+    out << code;
+    out.close();
+    return !ec;
+}
+
+/**
+ * @brief Updates the main file's contents
+ *
+ * @param sm
+ * @param replacements
+ * @return true on success
+ * @return false on failure
+ */
+bool updateMainFileContents(SourceManager &sm, Replacements &replacements)
+{
+    Rewriter rewriter(sm, LangOptions());
+    if (!applyAllReplacements(replacements, rewriter))
+    {
+        return false;
+    }
+
+    // convert to memory buffer
+    RewriteBuffer &rewriteBuffer = rewriter.getEditBuffer(sm.getMainFileID());
+    string contents(rewriteBuffer.begin(), rewriteBuffer.end());
+
+    // write to sm, make sure to make it so that sm owns the string (getMemBufferCopy)
+    const FileEntry *mainFile = sm.getFileEntryForID(sm.getMainFileID());
+    sm.overrideFileContents(mainFile, MemoryBuffer::getMemBufferCopy(contents));
+    return !rewriter.overwriteChangedFiles(); // TODO - figure out why null characters get added between tool usages
+}
 
 int main(int argc, const char **argv)
 {
@@ -62,7 +104,7 @@ int main(int argc, const char **argv)
         if (std::error_code ec = codeOrErr.getError())
         {
             errs() << fileName << ": " << ec.message() << "\n";
-            return 4;
+            return 2;
         }
         code = std::move(codeOrErr.get());
     }
@@ -77,13 +119,13 @@ int main(int argc, const char **argv)
     if (fromSTDIN)
     {
         fileName = "/tmp/golfC-Minifier.c";
-        error_code ignored;
-        raw_fd_ostream tmpFileWriter(fileName, ignored);
-        tmpFileWriter << code->getBuffer();
-        tmpFileWriter.close();
+        writeToFile(fileName, code->getBuffer());
     }
 
-    // apply minify action
+    // set main file, create rewriter
+    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(fileName), SrcMgr::C_User));
+
+    // initialize tool
     if (compDB == nullptr)
     {
         errs() << "Please provide compilation options with -- \n";
@@ -91,23 +133,35 @@ int main(int argc, const char **argv)
     }
     Replacements replacements;
     ClangTool tool(*compDB, {fileName}, make_shared<PCHContainerOperations>(), fs);
+
     // first, get existing preprocessor defines
     set<string> definitions;
     tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
+
+    // next up, expand macros and save the results
+    if (expandAll.getValue())
+    {
+        tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
+        if (!updateMainFileContents(sm, replacements))
+        {
+            errs() << "Failed to apply expand macros action\n";
+            return 4;
+        }
+    }
+
     // then run the minify tool
+    replacements = Replacements();
     if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
     {
         // error while running the tool
-        return 4;
+        return 5;
     }
 
     // apply those rewrites
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(fileName), SrcMgr::C_User));
-    Rewriter rewriter(sm, LangOptions());
-    if (!applyAllReplacements(replacements, rewriter))
+    if (!updateMainFileContents(sm, replacements))
     {
         errs() << "Failed to apply minify action rewrites!\n";
-        return 5;
+        return 6;
     }
 
     // format
@@ -115,23 +169,20 @@ int main(int argc, const char **argv)
     replacements = formatter.process();
 
     // save format replacements too
-    if (!applyAllReplacements(replacements, rewriter))
+    if (!updateMainFileContents(sm, replacements))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
-        return 6;
+        return 7;
     }
 
     // output
-    RewriteBuffer &buffer = rewriter.getEditBuffer(sm.getMainFileID());
+    StringRef finalOutput = sm.getBufferData(sm.getMainFileID());
     if (inPlace.getValue() && !fromSTDIN)
     {
-        error_code ec;
-        raw_fd_ostream out(fileName, ec);
-        buffer.write(out);
-        out.close();
+        writeToFile(fileName, finalOutput);
     }
     else
     {
-        buffer.write(outs());
+        outs() << finalOutput;
     }
 }
