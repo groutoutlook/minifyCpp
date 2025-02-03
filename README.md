@@ -10,7 +10,7 @@ Note: as of now, you must provide the include directories as extra arguments to 
 For instance:
 
 ```sh
-minifier myFile.c -- -I /usr/lib/clang/17/include
+minifier myFile.c -- -I /usr/lib/clang/17/include -Wno-null-character
 ```
 
 ## Features

@@ -39,11 +39,11 @@ public:
         {
             if (IsAngled)
             {
-                ss << "#include<" << FileName.str() << ">\n";
+                ss << "\n#include<" << FileName.str() << ">\n";
             }
             else
             {
-                ss << "#include\"" << FileName.str() << "\"\n";
+                ss << "\n#include\"" << FileName.str() << "\"\n";
             }
         }
     }
@@ -64,17 +64,16 @@ void process(SourceManager &sm, Preprocessor &preproc, Replacements *r)
         SourceLocation fileLoc = sm.getFileLoc(tok.getLocation());
         if (sm.getFileID(fileLoc) == sm.getMainFileID())
         {
-            o << preproc.getSpelling(tok) << "\n";
+            o << preproc.getSpelling(tok) << " ";
         }
         preproc.Lex(tok);
     }
 
     // output
-    string output = o.str();
     SourceLocation mainFileBegin = sm.getLocForStartOfFile(sm.getMainFileID());
-    SourceLocation mainFileEnd = sm.getLocForEndOfFile(sm.getMainFileID());
-    SourceRange mainFileRange(mainFileBegin, mainFileEnd);
-    cantFail(r->add(Replacement(sm, CharSourceRange::getCharRange(mainFileRange), output)));
+    SourceLocation mainFileEnd = tok.getLocation();
+    const CharSourceRange &mainFileRange = CharSourceRange::getCharRange(SourceRange(mainFileBegin, mainFileEnd));
+    cantFail(r->add(Replacement(sm, mainFileRange, o.str())));
 }
 void ExpandMacroAction::ExecuteAction()
 {
