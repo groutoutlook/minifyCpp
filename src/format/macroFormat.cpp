@@ -22,7 +22,8 @@ struct TokenInfo
     friend ostream &operator<<(ostream &o, const TokenInfo &t) { return o << t.spelling; }
 };
 
-vector<TokenInfo> getTokens(SourceManager &sm)
+// returns tokens and the end location
+pair<vector<TokenInfo>, SourceLocation> getTokens(SourceManager &sm)
 {
     // initialize lexer and result
     vector<TokenInfo> tokens;
@@ -67,7 +68,7 @@ vector<TokenInfo> getTokens(SourceManager &sm)
         tokens.push_back(TokenInfo(spelling, isPP));
     }
 
-    return tokens;
+    return {tokens, tok.getLocation()};
 }
 
 pair<int, vector<int>> mostValuableSubarray(vector<int> &tokens, map<int, int> &weights, int k)
@@ -145,7 +146,7 @@ clang::tooling::Replacements MacroFormatter::process()
     clang::tooling::Replacements result;
 
     // step 1 - lex the file into raw tokens;
-    vector<TokenInfo> tokens = getTokens(sm);
+    auto [tokens, endLocation] = getTokens(sm);
 
     // next up, convert that into distinct numbers
     int cur = 0;
@@ -275,6 +276,6 @@ clang::tooling::Replacements MacroFormatter::process()
         resultString += " ";
     }
     Replacements replacements;
-    llvm::cantFail(replacements.add(Replacement(sm, CharSourceRange::getCharRange(sm.getLocForStartOfFile(sm.getMainFileID()), sm.getLocForEndOfFile(sm.getMainFileID())), resultString)));
+    llvm::cantFail(replacements.add(Replacement(sm, CharSourceRange::getCharRange(sm.getLocForStartOfFile(sm.getMainFileID()), endLocation), resultString)));
     return replacements;
 }

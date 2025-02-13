@@ -175,4 +175,5 @@ Finally, we do a pass over the tokens to remove spaces where applicable.
 - While minify-C can properly handle includes, there is currently no support for multi-file minimization.
 - Macros that declare variables may end up conflicting with minified variables
 - Macros that are used to reference different variables across
-  their lifetime will cause the program to crash. Use the -ea flag for this.
+  their lifetime will cause the program to crash. Use the `--expand-all` flag for this.
+- Large files may take a long time to process due to define macro addition. If minimizing is taking too long, try using the `--no-add-macros` flag.

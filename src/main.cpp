@@ -16,7 +16,7 @@ using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
 
-static cl::OptionCategory options("options");
+static cl::OptionCategory options("Minifier Options");
 static cl::opt<std::string> file(
     cl::Positional,
     cl::desc("[source]"),
@@ -26,10 +26,14 @@ static cl::opt<bool> inPlace(
     cl::desc("Whether to process the file in place, only works if [source] is specified"),
     cl::value_desc("inplace"), cl::init(false), cl::cat(options));
 static cl::opt<bool> expandAll(
-    "ea",
+    "expand-all",
     cl::desc("Whether to expand all macros encountered in the source file"),
-    cl::value_desc("expandAll"), cl::init(false), cl::cat(options));
-static cl::list<std::string> ArgsAfter(
+    cl::value_desc("expand-all"), cl::init(false), cl::cat(options));
+static cl::opt<bool> noAddMacros(
+    "no-add-macros",
+    cl::desc("Disable minimizing the file by finding repeated subsequences and defining those as body macros"),
+    cl::value_desc("no-add-macros"), cl::init(false), cl::cat(options));
+static cl::list<std::string> argsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
     cl::sub(cl::SubCommand::getAll()), cl::cat(options));
@@ -53,7 +57,8 @@ bool writeToFile(const StringRef fileName, const StringRef code)
  */
 bool updateMainFileContents(SourceManager &sm, Replacements &replacements)
 {
-    Rewriter rewriter(sm, LangOptions());
+    LangOptions langOpts;
+    Rewriter rewriter(sm, langOpts);
     if (!applyAllReplacements(replacements, rewriter))
     {
         return false;
@@ -110,30 +115,33 @@ int main(int argc, const char **argv)
         code = std::move(codeOrErr.get());
     }
 
-    // create FS and set up file, if needed
+    // create FS and set up file
+    const string tmpFileName = "/tmp/golfC-Minifier.c";
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs = llvm::vfs::getRealFileSystem();
+    if (!writeToFile(tmpFileName, code->getBuffer()))
+    {
+        errs() << "Failed to write temporary file\n";
+        return 3;
+    }
+
+    // set up other stuff
     IntrusiveRefCntPtr<FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fs));
     IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
     DiagnosticsEngine diagnostics(
         IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
     SourceManager sm(diagnostics, *fileManagerPtr);
-    if (fromSTDIN)
-    {
-        fileName = "/tmp/golfC-Minifier.c";
-        writeToFile(fileName, code->getBuffer());
-    }
 
     // set main file, create rewriter
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(fileName), SrcMgr::C_User));
+    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(tmpFileName), SrcMgr::C_User));
 
     // initialize tool
     if (compDB == nullptr)
     {
         errs() << "Please provide compilation options with -- \n";
-        return 3;
+        return 4;
     }
     Replacements replacements;
-    ClangTool tool(*compDB, {fileName}, make_shared<PCHContainerOperations>(), fs);
+    ClangTool tool(*compDB, {tmpFileName}, make_shared<PCHContainerOperations>(), fs, fileManagerPtr);
 
     // first, get existing preprocessor defines
     set<string> definitions;
@@ -146,36 +154,37 @@ int main(int argc, const char **argv)
         if (!updateMainFileContents(sm, replacements))
         {
             errs() << "Failed to apply expand macros action\n";
-            return 4;
+            return 5;
         }
     }
 
-    // then run the minify tool
+    // then run the variable minify tool
     replacements = Replacements();
     int firstUnusedSymbol = 0;
     if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get()))
     {
         // error while running the tool
-        return 5;
+        return 6;
     }
-
     // apply those rewrites
     if (!updateMainFileContents(sm, replacements))
     {
         errs() << "Failed to apply minify action rewrites!\n";
-        return 6;
-    }
-
-    // combine / add macros
-    MacroFormatter macroFormatter(sm, firstUnusedSymbol);
-    replacements = macroFormatter.process();
-    // apply the rewrites
-    if (!updateMainFileContents(sm, replacements))
-    {
-        errs() << "Failed to apply macro format rewrites!\n";
         return 7;
     }
 
+    // combine / add macros
+    if (!noAddMacros.getValue())
+    {
+        MacroFormatter macroFormatter(sm, firstUnusedSymbol);
+        replacements = macroFormatter.process();
+        // apply the rewrites
+        if (!updateMainFileContents(sm, replacements))
+        {
+            errs() << "Failed to apply macro format rewrites!\n";
+            return 8;
+        }
+    }
     // minify format (remove spaces)
     MinifyFormatter formatter(sm);
     replacements = formatter.process();
@@ -183,7 +192,7 @@ int main(int argc, const char **argv)
     if (!updateMainFileContents(sm, replacements))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
-        return 8;
+        return 9;
     }
 
     // output
