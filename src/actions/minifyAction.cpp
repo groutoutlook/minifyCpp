@@ -1,4 +1,5 @@
 #include <actions/minifyAction.hpp>
+#include <util/symbols.hpp>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Frontend/CompilerInstance.h>
@@ -16,84 +17,6 @@ using namespace std;
 using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
-
-// constants
-const set<string> keywords = {
-    "auto",
-    "break",
-    "case",
-    "char",
-    "const",
-    "continue",
-    "default",
-    "do",
-    "double",
-    "else",
-    "enum",
-    "extern",
-    "float",
-    "for",
-    "goto",
-    "if",
-    "inline",
-    "int",
-    "long",
-    "register",
-    "restrict",
-    "return",
-    "short",
-    "signed",
-    "sizeof",
-    "static",
-    "struct",
-    "switch",
-    "typedef",
-    "union",
-    "unsigned",
-    "void",
-    "volatile",
-    "while",
-    "_Bool",
-    "_Complex",
-    "_Imaginary",
-};
-
-/**
- * @brief Calculates the next number that can be used for an identifier
- *
- * @param i the current number requested
- * @return pair<int, string> a pair containing (nextNumber, identifier)
- */
-pair<int, string> toSymbol(int i, const set<string> &reserved, set<string> *defines)
-{
-    int curNum = i;
-    string result;
-    do
-    {
-        i = curNum;
-        vector<char> resultArr;
-        while (i >= 0)
-        {
-            int tmp = i % 52; // use every lowercase and uppercase letter
-            if (tmp < 26)
-            {
-                resultArr.push_back('a' + tmp);
-            }
-            else
-            {
-                resultArr.push_back('A' + tmp - 26);
-            }
-            i /= 52;
-            i -= 1;
-        }
-        reverse(resultArr.begin(), resultArr.end());
-        result = string(resultArr.begin(), resultArr.end());
-        ++curNum;
-
-        // keep going while this is a keyword or reserved identifier
-    } while (keywords.find(result) != keywords.end() || reserved.find(result) != reserved.end() || defines->find(result) != defines->end());
-    return {curNum, result};
-}
 
 // for now, we will not rename structs or enums or typedefs
 // due to the fact that these are hard to trace in function pointer
@@ -114,7 +37,7 @@ private:
         SourceLocation end;
         struct ScopePair
         {
-            int maxUsedSymbol;
+            int maxUsedSymbol; // exclusive
             set<string> externalSymbols;
 
             ScopePair(int maxUsedSymbol = 0) : maxUsedSymbol(maxUsedSymbol) {};
@@ -133,6 +56,7 @@ private:
     map<void *, int> typeNames;    // for enum/(struct/union) name rewrites
     map<Decl *, int> declarations; // for variables and functions and typedefs
     set<string> *definitions;      // for reserved macro-defined identifiers
+    int *firstUnusedSymbol;        // not owned by this class
     ASTContext *context;
 
     void adjustScopes(SourceLocation cur)
@@ -144,6 +68,12 @@ private:
         {
             scopes.pop_back();
         }
+    }
+
+    void adjustMaxUsedSymbol(Scope::ScopePair &scope, int nextSymbolNum)
+    {
+        scope.maxUsedSymbol = nextSymbolNum;
+        *firstUnusedSymbol = max(*firstUnusedSymbol, nextSymbolNum);
     }
 
 public:
@@ -162,7 +92,7 @@ public:
      * scopes in the scope stack.
      * @param context the ASTContext to use with this StateManager
      */
-    StateManager(set<string> *definitions, ASTContext *context) : definitions(definitions), context(context)
+    StateManager(set<string> *definitions, int *firstUnusedSymbol, ASTContext *context) : definitions(definitions), firstUnusedSymbol(firstUnusedSymbol), context(context)
     {
         // start with a global scope
         FileID mainFileId = context->getSourceManager().getMainFileID();
@@ -185,7 +115,7 @@ public:
         int symbolNum = relevant.maxUsedSymbol;
         auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().declarations.externalSymbols, definitions); // external symbols only really apply from global scope
         declarations[decl->getCanonicalDecl()] = symbolNum;
-        relevant.maxUsedSymbol = nextSymbolNum;
+        adjustMaxUsedSymbol(relevant, nextSymbolNum);
         return str;
     }
     /**
@@ -205,7 +135,7 @@ public:
         int symbolNum = relevant.maxUsedSymbol;
         auto [nextSymbolNum, str] = toSymbol(symbolNum, scopes.front().typeNames.externalSymbols, definitions); // external symbols only really apply from global scope
         typeNames[tp.getAsOpaquePtr()] = symbolNum;
-        relevant.maxUsedSymbol = nextSymbolNum;
+        adjustMaxUsedSymbol(relevant, nextSymbolNum);
         return str;
     }
     /**
@@ -308,8 +238,8 @@ private:
     StateManager manager;
 
 public:
-    explicit MinifierVisitor(set<string> *definitions, Replacements *r, ASTContext *context, string sourceFileName)
-        : replacements(r), context(context), sourceFileName(sourceFileName), manager(definitions, context) {}
+    explicit MinifierVisitor(set<string> *definitions, Replacements *r, int *firstUnusedSymbol, ASTContext *context, string sourceFileName)
+        : replacements(r), context(context), sourceFileName(sourceFileName), manager(definitions, firstUnusedSymbol, context) {}
 
     template <typename T>
     pair<SourceLocation, bool> getLoc(T *decl)
@@ -564,36 +494,37 @@ private:
     MinifierVisitor visitor;
 
 public:
-    explicit MinifierConsumer(set<string> *definitions, Replacements *r, ASTContext *context, string sourceFileName)
-        : visitor(definitions, r, context, sourceFileName) {}
+    explicit MinifierConsumer(set<string> *definitions, Replacements *r, int *firstUnusedSymbol, ASTContext *context, string sourceFileName)
+        : visitor(definitions, r, firstUnusedSymbol, context, sourceFileName) {}
 
     virtual void HandleTranslationUnit(clang::ASTContext &context) override
     {
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 };
-MinifierAction::MinifierAction(Replacements *replacements, set<string> *definitions) : replacements(replacements), definitions(definitions) {};
+MinifierAction::MinifierAction(Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol) : replacements(replacements), definitions(definitions), firstUnusedSymbol(firstUnusedSymbol) {};
 std::unique_ptr<clang::ASTConsumer>
 MinifierAction::CreateASTConsumer(clang::CompilerInstance &compiler,
                                   llvm::StringRef inFile)
 {
     return std::make_unique<MinifierConsumer>(
-        definitions, replacements, &compiler.getASTContext(),
+        definitions, replacements, firstUnusedSymbol, &compiler.getASTContext(),
         inFile.str());
 }
 
-std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements, set<string> *definitions)
+std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol)
 {
     class MinifierActionFactory : public FrontendActionFactory
     {
     public:
         Replacements *replacements;
         set<string> *definitions;
-        MinifierActionFactory(Replacements *rs, set<string> *definitions) : replacements(rs), definitions(definitions) {};
+        int *firstUnusedSymbol;
+        MinifierActionFactory(Replacements *rs, set<string> *definitions, int *firstUnusedSymbol) : replacements(rs), definitions(definitions), firstUnusedSymbol(firstUnusedSymbol) {};
         std::unique_ptr<FrontendAction> create() override
         {
-            return std::make_unique<MinifierAction>(replacements, definitions);
+            return std::make_unique<MinifierAction>(replacements, definitions, firstUnusedSymbol);
         }
     };
-    return std::make_unique<MinifierActionFactory>(replacements, definitions);
+    return std::make_unique<MinifierActionFactory>(replacements, definitions, firstUnusedSymbol);
 }

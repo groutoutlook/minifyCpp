@@ -2,6 +2,7 @@
 #include <actions/minifyAction.hpp>
 #include <actions/PPSymbolsAction.hpp>
 #include <format/minifyFormat.hpp>
+#include <format/macroFormat.hpp>
 #include <llvm/Support/CommandLine.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Rewrite/Core/Rewriter.h>
@@ -151,7 +152,8 @@ int main(int argc, const char **argv)
 
     // then run the minify tool
     replacements = Replacements();
-    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
+    int firstUnusedSymbol = 0;
+    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get()))
     {
         // error while running the tool
         return 5;
@@ -164,15 +166,24 @@ int main(int argc, const char **argv)
         return 6;
     }
 
-    // format
+    // combine / add macros
+    MacroFormatter macroFormatter(sm, firstUnusedSymbol);
+    replacements = macroFormatter.process();
+    // apply the rewrites
+    if (!updateMainFileContents(sm, replacements))
+    {
+        errs() << "Failed to apply macro format rewrites!\n";
+        return 7;
+    }
+
+    // minify format (remove spaces)
     MinifyFormatter formatter(sm);
     replacements = formatter.process();
-
     // save format replacements too
     if (!updateMainFileContents(sm, replacements))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
-        return 7;
+        return 8;
     }
 
     // output

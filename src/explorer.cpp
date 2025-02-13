@@ -266,9 +266,10 @@ class ExplorerPPCallbacks : public PPCallbacks
 {
 private:
     SourceManager &manager;
+    Preprocessor &preproc;
 
 public:
-    ExplorerPPCallbacks(SourceManager &manager) : manager(manager) {};
+    ExplorerPPCallbacks(SourceManager &manager, Preprocessor &preproc) : manager(manager), preproc(preproc) {};
     virtual void MacroDefined(const Token &macroNameTok, const MacroDirective *MD) override
     {
         if (MD->getMacroInfo()->isFunctionLike())
@@ -283,6 +284,12 @@ public:
         MD->getMacroInfo()->getDefinitionLoc().dump(manager);
         outs() << "to ";
         MD->getMacroInfo()->getDefinitionEndLoc().dump(manager);
+        outs() << " definition: ";
+        for (const auto &t : MD->getMacroInfo()->tokens())
+        {
+            outs() << preproc.getSpelling(t) << " ";
+        }
+        outs() << "\n";
     }
 
     virtual void MacroExpands(const Token &MacroNameTok,
@@ -312,7 +319,7 @@ public:
                       llvm::StringRef inFile) override
     {
         outs() << "Processing " << inFile << "\n";
-        compiler.getPreprocessor().addPPCallbacks(make_unique<ExplorerPPCallbacks>(compiler.getSourceManager()));
+        compiler.getPreprocessor().addPPCallbacks(make_unique<ExplorerPPCallbacks>(compiler.getSourceManager(), compiler.getPreprocessor()));
         for (const auto &item : compiler.getHeaderSearchOpts().UserEntries)
         {
             outs() << "have item " << item.Path << " " << item.IgnoreSysRoot << " " << item.Group << " " << item.IsFramework << "\n";
