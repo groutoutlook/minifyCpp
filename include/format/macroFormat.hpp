@@ -2,6 +2,7 @@
 #include <clang/Tooling/Tooling.h>
 #include <clang/Tooling/Core/Replacement.h>
 #include <clang/Format/Format.h>
+#include <llvm/ADT/IntrusiveRefCntPtr.h>
 
 /**
  * @brief Adds macro defines to the top of the file
@@ -11,10 +12,11 @@
 class MacroFormatter
 {
 public:
-    MacroFormatter(clang::SourceManager &sm, int firstUnusedSymbol);
+    MacroFormatter(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const std::string &mainFileName, int firstUnusedSymbol);
     clang::tooling::Replacements process();
 
 private:
-    clang::SourceManager &sm;
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem;
+    const std::string &mainFileName;
     int firstUnusedSymbol;
 };

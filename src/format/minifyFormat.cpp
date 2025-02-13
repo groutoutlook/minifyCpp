@@ -4,7 +4,7 @@ using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
 using namespace std;
-MinifyFormatter::MinifyFormatter(SourceManager &sm) : sm(sm) {}
+MinifyFormatter::MinifyFormatter(IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const string &mainFileName) : fileSystem(fileSystem), mainFileName(mainFileName) {}
 
 enum LastTokenType
 {
@@ -76,6 +76,14 @@ LastTokenType getTokenType(const Token &t)
 
 Replacements MinifyFormatter::process()
 {
+    // initialize filemanager and sourcemanager
+    IntrusiveRefCntPtr<clang::FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fileSystem));
+    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
+    DiagnosticsEngine diagnostics(
+        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
+    SourceManager sm(diagnostics, *fileManagerPtr);
+    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(mainFileName), SrcMgr::C_User));
+
     Replacements result;
     LangOptions opts;
     Lexer lexer(sm.getMainFileID(), sm.getMemoryBufferForFileOrFake(*sm.getFileEntryRefForID(sm.getMainFileID())), sm, opts);

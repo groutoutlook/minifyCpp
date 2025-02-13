@@ -20,4 +20,4 @@ FROM ubuntu:24.04 AS executable
 COPY --from=build /work/build/golfC-1.1.1-Linux.deb /
 RUN apt-get update && \
     apt install /golfC-1.1.1-Linux.deb clang-17 -y
-ENTRYPOINT [ "minifier", "--", "-I", "/usr/lib/clang/17/include", "-Wno-null-character" ]
+ENTRYPOINT [ "minifier", "--", "-I", "/usr/lib/clang/17/include" ]

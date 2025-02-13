@@ -16,6 +16,7 @@ using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
 
+// arguments
 static cl::OptionCategory options("Minifier Options");
 static cl::opt<std::string> file(
     cl::Positional,
@@ -38,6 +39,7 @@ static cl::list<std::string> argsAfter(
     cl::desc("Additional argument to append to the compiler command line"),
     cl::sub(cl::SubCommand::getAll()), cl::cat(options));
 
+// helper function to simplify writing to a file
 bool writeToFile(const StringRef fileName, const StringRef code)
 {
     error_code ec;
@@ -45,6 +47,13 @@ bool writeToFile(const StringRef fileName, const StringRef code)
     out << code;
     out.close();
     return !ec;
+}
+
+// helper function to create a clang tool
+ClangTool createTool(CompilationDatabase *compDB, string mainFileName, IntrusiveRefCntPtr<vfs::FileSystem> vfs)
+{
+    // create a clang tool
+    return ClangTool(*compDB, {mainFileName}, make_shared<PCHContainerOperations>(), vfs);
 }
 
 /**
@@ -55,23 +64,21 @@ bool writeToFile(const StringRef fileName, const StringRef code)
  * @return true on success
  * @return false on failure
  */
-bool updateMainFileContents(SourceManager &sm, Replacements &replacements)
+bool updateMainFileContents(IntrusiveRefCntPtr<vfs::OverlayFileSystem> vfs, const string &mainFileName, Replacements &replacements)
 {
-    LangOptions langOpts;
-    Rewriter rewriter(sm, langOpts);
-    if (!applyAllReplacements(replacements, rewriter))
+    StringRef mainFileContents = vfs->getBufferForFile(mainFileName)->get()->getBuffer();
+    Expected<string> mainFileContentsAfterReplacements = applyAllReplacements(mainFileContents, replacements);
+    if (!mainFileContentsAfterReplacements)
     {
         return false;
     }
 
-    // convert to memory buffer
-    RewriteBuffer &rewriteBuffer = rewriter.getEditBuffer(sm.getMainFileID());
-    string contents(rewriteBuffer.begin(), rewriteBuffer.end());
-
-    // write to sm, make sure to make it so that sm owns the string (getMemBufferCopy)
-    const FileEntry *mainFile = sm.getFileEntryForID(sm.getMainFileID());
-    sm.overrideFileContents(mainFile, MemoryBuffer::getMemBufferCopy(contents));
-    return !rewriter.overwriteChangedFiles(); // TODO - figure out why null characters get added between tool usages
+    // update the file in the overlay
+    // since there's no direct way to edit, simply add a new layer on top to override the contents
+    IntrusiveRefCntPtr<vfs::InMemoryFileSystem> topLayer = new vfs::InMemoryFileSystem();
+    topLayer->addFile(mainFileName, 0, MemoryBuffer::getMemBufferCopy(*mainFileContentsAfterReplacements));
+    vfs->pushOverlay(topLayer);
+    return true;
 }
 
 int main(int argc, const char **argv)
@@ -117,22 +124,10 @@ int main(int argc, const char **argv)
 
     // create FS and set up file
     const string tmpFileName = "/tmp/golfC-Minifier.c";
-    IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs = llvm::vfs::getRealFileSystem();
-    if (!writeToFile(tmpFileName, code->getBuffer()))
-    {
-        errs() << "Failed to write temporary file\n";
-        return 3;
-    }
-
-    // set up other stuff
-    IntrusiveRefCntPtr<FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fs));
-    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
-    DiagnosticsEngine diagnostics(
-        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
-    SourceManager sm(diagnostics, *fileManagerPtr);
-
-    // set main file, create rewriter
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(tmpFileName), SrcMgr::C_User));
+    IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlayFS = new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem());
+    IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inMemoryFileSystem = new llvm::vfs::InMemoryFileSystem();
+    overlayFS->pushOverlay(inMemoryFileSystem);
+    inMemoryFileSystem->addFile(tmpFileName, 0, MemoryBuffer::getMemBufferCopy(code->getBuffer()));
 
     // initialize tool
     if (compDB == nullptr)
@@ -141,17 +136,16 @@ int main(int argc, const char **argv)
         return 4;
     }
     Replacements replacements;
-    ClangTool tool(*compDB, {tmpFileName}, make_shared<PCHContainerOperations>(), fs, fileManagerPtr);
 
     // first, get existing preprocessor defines
     set<string> definitions;
-    tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
+    createTool(compDB.get(), tmpFileName, overlayFS).run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
 
     // next up, expand macros and save the results
     if (expandAll.getValue())
     {
-        tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
-        if (!updateMainFileContents(sm, replacements))
+        createTool(compDB.get(), tmpFileName, overlayFS).run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
+        if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
         {
             errs() << "Failed to apply expand macros action\n";
             return 5;
@@ -161,42 +155,38 @@ int main(int argc, const char **argv)
     // then run the variable minify tool
     replacements = Replacements();
     int firstUnusedSymbol = 0;
-    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get()))
-    {
-        // error while running the tool
-        return 6;
-    }
+    createTool(compDB.get(), tmpFileName, overlayFS).run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get());
     // apply those rewrites
-    if (!updateMainFileContents(sm, replacements))
+    if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {
         errs() << "Failed to apply minify action rewrites!\n";
-        return 7;
+        return 6;
     }
 
     // combine / add macros
     if (!noAddMacros.getValue())
     {
-        MacroFormatter macroFormatter(sm, firstUnusedSymbol);
+        MacroFormatter macroFormatter(overlayFS, tmpFileName, firstUnusedSymbol);
         replacements = macroFormatter.process();
         // apply the rewrites
-        if (!updateMainFileContents(sm, replacements))
+        if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
         {
             errs() << "Failed to apply macro format rewrites!\n";
-            return 8;
+            return 7;
         }
     }
     // minify format (remove spaces)
-    MinifyFormatter formatter(sm);
+    MinifyFormatter formatter(overlayFS, tmpFileName);
     replacements = formatter.process();
     // save format replacements too
-    if (!updateMainFileContents(sm, replacements))
+    if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
-        return 9;
+        return 8;
     }
 
-    // output
-    StringRef finalOutput = sm.getBufferData(sm.getMainFileID());
+    // output.
+    StringRef finalOutput = overlayFS->getBufferForFile(tmpFileName)->get()->getBuffer();
     if (inPlace.getValue() && !fromSTDIN)
     {
         writeToFile(fileName, finalOutput);

@@ -10,7 +10,7 @@ using namespace llvm;
 using namespace std;
 
 // ctor
-MacroFormatter::MacroFormatter(SourceManager &sm, int firstUnusedSymbol) : sm(sm), firstUnusedSymbol(firstUnusedSymbol) {}
+MacroFormatter::MacroFormatter(IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const string &mainFileName, int firstUnusedSymbol) : fileSystem(fileSystem), mainFileName(mainFileName), firstUnusedSymbol(firstUnusedSymbol) {}
 
 struct TokenInfo
 {
@@ -143,6 +143,15 @@ pair<int, vector<int>> mostValuableSubarray(vector<int> &tokens, map<int, int> &
 // process
 clang::tooling::Replacements MacroFormatter::process()
 {
+    // initialize sourcemanager and set main file
+    IntrusiveRefCntPtr<clang::FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fileSystem));
+    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
+    DiagnosticsEngine diagnostics(
+        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
+    SourceManager sm(diagnostics, *fileManagerPtr);
+    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(mainFileName), SrcMgr::C_User));
+
+    // initialize result
     clang::tooling::Replacements result;
 
     // step 1 - lex the file into raw tokens;
