@@ -12,9 +12,10 @@ class MinifierAction : public clang::ASTFrontendAction
 private:
     clang::tooling::Replacements *replacements;
     std::set<std::string> *definitions;
+    int *firstUnusedSymbol;
 
 public:
-    MinifierAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions);
+    MinifierAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions, int *firstUnusedSymbol);
     virtual std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &compiler,
                                                                   llvm::StringRef inFile) override;
     /**
@@ -23,5 +24,5 @@ public:
      * @param replacements out
      * @return std::unique_ptr<clang::tooling::FrontendActionFactory>
      */
-    static std::unique_ptr<clang::tooling::FrontendActionFactory> newMinifierAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions);
+    static std::unique_ptr<clang::tooling::FrontendActionFactory> newMinifierAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions, int *firstUnusedSymbol);
 };

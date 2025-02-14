@@ -2,6 +2,7 @@
 #include <actions/minifyAction.hpp>
 #include <actions/PPSymbolsAction.hpp>
 #include <format/minifyFormat.hpp>
+#include <format/macroFormat.hpp>
 #include <llvm/Support/CommandLine.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Rewrite/Core/Rewriter.h>
@@ -15,7 +16,8 @@ using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
 
-static cl::OptionCategory options("options");
+// arguments
+static cl::OptionCategory options("Minifier Options");
 static cl::opt<std::string> file(
     cl::Positional,
     cl::desc("[source]"),
@@ -25,14 +27,19 @@ static cl::opt<bool> inPlace(
     cl::desc("Whether to process the file in place, only works if [source] is specified"),
     cl::value_desc("inplace"), cl::init(false), cl::cat(options));
 static cl::opt<bool> expandAll(
-    "ea",
+    "expand-all",
     cl::desc("Whether to expand all macros encountered in the source file"),
-    cl::value_desc("expandAll"), cl::init(false), cl::cat(options));
-static cl::list<std::string> ArgsAfter(
+    cl::value_desc("expand-all"), cl::init(false), cl::cat(options));
+static cl::opt<bool> noAddMacros(
+    "no-add-macros",
+    cl::desc("Disable minimizing the file by finding repeated subsequences and defining those as body macros"),
+    cl::value_desc("no-add-macros"), cl::init(false), cl::cat(options));
+static cl::list<std::string> argsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
     cl::sub(cl::SubCommand::getAll()), cl::cat(options));
 
+// helper function to simplify writing to a file
 bool writeToFile(const StringRef fileName, const StringRef code)
 {
     error_code ec;
@@ -40,6 +47,13 @@ bool writeToFile(const StringRef fileName, const StringRef code)
     out << code;
     out.close();
     return !ec;
+}
+
+// helper function to create a clang tool
+ClangTool createTool(CompilationDatabase *compDB, string mainFileName, IntrusiveRefCntPtr<vfs::FileSystem> vfs)
+{
+    // create a clang tool
+    return ClangTool(*compDB, {mainFileName}, make_shared<PCHContainerOperations>(), vfs);
 }
 
 /**
@@ -50,22 +64,21 @@ bool writeToFile(const StringRef fileName, const StringRef code)
  * @return true on success
  * @return false on failure
  */
-bool updateMainFileContents(SourceManager &sm, Replacements &replacements)
+bool updateMainFileContents(IntrusiveRefCntPtr<vfs::OverlayFileSystem> vfs, const string &mainFileName, Replacements &replacements)
 {
-    Rewriter rewriter(sm, LangOptions());
-    if (!applyAllReplacements(replacements, rewriter))
+    StringRef mainFileContents = vfs->getBufferForFile(mainFileName)->get()->getBuffer();
+    Expected<string> mainFileContentsAfterReplacements = applyAllReplacements(mainFileContents, replacements);
+    if (!mainFileContentsAfterReplacements)
     {
         return false;
     }
 
-    // convert to memory buffer
-    RewriteBuffer &rewriteBuffer = rewriter.getEditBuffer(sm.getMainFileID());
-    string contents(rewriteBuffer.begin(), rewriteBuffer.end());
-
-    // write to sm, make sure to make it so that sm owns the string (getMemBufferCopy)
-    const FileEntry *mainFile = sm.getFileEntryForID(sm.getMainFileID());
-    sm.overrideFileContents(mainFile, MemoryBuffer::getMemBufferCopy(contents));
-    return !rewriter.overwriteChangedFiles(); // TODO - figure out why null characters get added between tool usages
+    // update the file in the overlay
+    // since there's no direct way to edit, simply add a new layer on top to override the contents
+    IntrusiveRefCntPtr<vfs::InMemoryFileSystem> topLayer = new vfs::InMemoryFileSystem();
+    topLayer->addFile(mainFileName, 0, MemoryBuffer::getMemBufferCopy(*mainFileContentsAfterReplacements));
+    vfs->pushOverlay(topLayer);
+    return true;
 }
 
 int main(int argc, const char **argv)
@@ -109,74 +122,71 @@ int main(int argc, const char **argv)
         code = std::move(codeOrErr.get());
     }
 
-    // create FS and set up file, if needed
-    IntrusiveRefCntPtr<llvm::vfs::FileSystem> fs = llvm::vfs::getRealFileSystem();
-    IntrusiveRefCntPtr<FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fs));
-    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
-    DiagnosticsEngine diagnostics(
-        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
-    SourceManager sm(diagnostics, *fileManagerPtr);
-    if (fromSTDIN)
-    {
-        fileName = "/tmp/golfC-Minifier.c";
-        writeToFile(fileName, code->getBuffer());
-    }
-
-    // set main file, create rewriter
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(fileName), SrcMgr::C_User));
+    // create FS and set up file
+    const string tmpFileName = "/tmp/golfC-Minifier.c";
+    IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlayFS = new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem());
+    IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inMemoryFileSystem = new llvm::vfs::InMemoryFileSystem();
+    overlayFS->pushOverlay(inMemoryFileSystem);
+    inMemoryFileSystem->addFile(tmpFileName, 0, MemoryBuffer::getMemBufferCopy(code->getBuffer()));
 
     // initialize tool
     if (compDB == nullptr)
     {
         errs() << "Please provide compilation options with -- \n";
-        return 3;
+        return 4;
     }
     Replacements replacements;
-    ClangTool tool(*compDB, {fileName}, make_shared<PCHContainerOperations>(), fs);
 
     // first, get existing preprocessor defines
     set<string> definitions;
-    tool.run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
+    createTool(compDB.get(), tmpFileName, overlayFS).run(PPSymbolsAction::newPPSymbolsAction(&definitions).get());
 
     // next up, expand macros and save the results
     if (expandAll.getValue())
     {
-        tool.run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
-        if (!updateMainFileContents(sm, replacements))
+        createTool(compDB.get(), tmpFileName, overlayFS).run(ExpandMacroAction::newExpandMacroAction(&replacements).get());
+        if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
         {
             errs() << "Failed to apply expand macros action\n";
-            return 4;
+            return 5;
         }
     }
 
-    // then run the minify tool
+    // then run the variable minify tool
     replacements = Replacements();
-    if (tool.run(MinifierAction::newMinifierAction(&replacements, &definitions).get()))
-    {
-        // error while running the tool
-        return 5;
-    }
-
+    int firstUnusedSymbol = 0;
+    createTool(compDB.get(), tmpFileName, overlayFS).run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get());
     // apply those rewrites
-    if (!updateMainFileContents(sm, replacements))
+    if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {
         errs() << "Failed to apply minify action rewrites!\n";
         return 6;
     }
 
-    // format
-    MinifyFormatter formatter(sm);
+    // combine / add macros
+    if (!noAddMacros.getValue())
+    {
+        MacroFormatter macroFormatter(overlayFS, tmpFileName, firstUnusedSymbol);
+        replacements = macroFormatter.process();
+        // apply the rewrites
+        if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
+        {
+            errs() << "Failed to apply macro format rewrites!\n";
+            return 7;
+        }
+    }
+    // minify format (remove spaces)
+    MinifyFormatter formatter(overlayFS, tmpFileName);
     replacements = formatter.process();
-
     // save format replacements too
-    if (!updateMainFileContents(sm, replacements))
+    if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {
         llvm::errs() << "Failed to apply minify format rewrites\n";
-        return 7;
+        return 8;
     }
 
-    // output
-    StringRef finalOutput = sm.getBufferData(sm.getMainFileID());
+    // output.
+    StringRef finalOutput = overlayFS->getBufferForFile(tmpFileName)->get()->getBuffer();
     if (inPlace.getValue() && !fromSTDIN)
     {
         writeToFile(fileName, finalOutput);

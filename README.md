@@ -10,7 +10,7 @@ Note: as of now, you must provide the include directories as extra arguments to 
 For instance:
 
 ```sh
-minifier myFile.c -- -I /usr/lib/clang/17/include -Wno-null-character
+minifier myFile.c -- -I /usr/lib/clang/17/include
 ```
 
 ## Features
@@ -98,12 +98,14 @@ int main(int argc, char *argv[])
 The current output is the following:
 
 ```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <ctype.h>
-int main(int a,char*b[]){int c=STDIN_FILENO;if(a==2)c=open(b[1],O_RDONLY);int d=1;char e[16];char*f=e;int g=16;int h;int i=0;while(d){h=read(c,f,g);if(h==-1)exit(2);f+=h;g-=h;if(g==0||(h==0&&g!=16)){printf("%08x    ",i);i+=16;for(int j=0;j<16;++j){if(j<16-g)printf("%02hhx",e[j]);else printf("  ");if(j%2!=0)printf(" ");}printf("    ");for(int k=0;k<16;++k){if(k<16-g){if(isprint(e[k]))printf("%c",e[k]);else printf(".");}else printf(" ");}f=e;g=16;printf("\n");}d=h!=0;}}
+#define m int
+#define l printf(
+#include<stdio.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<fcntl.h>
+#include<ctype.h>
+m main(m a,char*b[]){m c=STDIN_FILENO;if(a==2)c=open(b[1],O_RDONLY);m d=1;char e[16];char*f=e;m g=16;m h;m i=0;while(d){h=read(c,f,g);if(h==-1)exit(2);f+=h;g-=h;if(g==0||(h==0&&g!=16)){l "%08x    ",i);i+=16;for(m j=0;j<16;++j){if(j<16-g)l "%02hhx",e[j]);else l "  ");if(j%2!=0)l " ");}l "    ");for(m k=0;k<16;++k){if(k<16-g){if(isprint(e[k]))l "%c",e[k]);else l ".");}else l " ");}f=e;g=16;l "\n");}d=h!=0;}}
 ```
 
 ## Building Natively
@@ -162,7 +164,7 @@ any spaces and replacing repeated patterns with defines (when it's worth it).
 The design is quite simple. First, we make a pass over the input and convert all variables
 into minimum-size variables.
 
-Then, (WIP) we do a pass over this output to look for patterns of repeated tokens. If a pattern satisfies
+Then, we do a pass over this output to look for patterns of repeated tokens. If a pattern satisfies
 the equation `N*L < 9+X+L`, where N is the number of appearances, L is the length of the pattern,
 in bytes, and X is the length of the next available identifier, then a define is added to the file
 and all occurrences of the pattern are replaced with the identifier assigned to the pattern.
@@ -174,3 +176,6 @@ Finally, we do a pass over the tokens to remove spaces where applicable.
 - minify-C is meant for minimizing a single source C file. It will not work with C++.
 - While minify-C can properly handle includes, there is currently no support for multi-file minimization.
 - Macros that declare variables may end up conflicting with minified variables
+- Macros that are used to reference different variables across
+  their lifetime will cause the program to crash. Use the `--expand-all` flag for this.
+- Large files may take a long time to process due to define macro addition. If minimizing is taking too long, try using the `--no-add-macros` flag.
