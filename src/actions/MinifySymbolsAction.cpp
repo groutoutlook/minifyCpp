@@ -1,4 +1,4 @@
-#include <actions/minifyAction.hpp>
+#include <actions/MinifySymbolsAction.hpp>
 #include <util/symbols.hpp>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/RecursiveASTVisitor.h>
@@ -80,7 +80,7 @@ public:
     /**
      * @brief StateManager constructor
      *
-     * Creates a StateManager to manage the state of the MinifierAction's
+     * Creates a StateManager to manage the state of the MinifySymbolsAction's
      * explorer. The StateManager will keep track of the current scope.
      * The current scope is the scope most recently added to the scope stack.
      * The scope stack is a stack of scopes, each with a start and end location.
@@ -502,17 +502,17 @@ public:
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 };
-MinifierAction::MinifierAction(Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol) : replacements(replacements), definitions(definitions), firstUnusedSymbol(firstUnusedSymbol) {};
+MinifySymbolsAction::MinifySymbolsAction(Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol) : replacements(replacements), definitions(definitions), firstUnusedSymbol(firstUnusedSymbol) {};
 std::unique_ptr<clang::ASTConsumer>
-MinifierAction::CreateASTConsumer(clang::CompilerInstance &compiler,
-                                  llvm::StringRef inFile)
+MinifySymbolsAction::CreateASTConsumer(clang::CompilerInstance &compiler,
+                                       llvm::StringRef inFile)
 {
     return std::make_unique<MinifierConsumer>(
         definitions, replacements, firstUnusedSymbol, &compiler.getASTContext(),
         inFile.str());
 }
 
-std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifierAction(clang::tooling::Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol)
+std::unique_ptr<clang::tooling::FrontendActionFactory> MinifySymbolsAction::newMinifierAction(clang::tooling::Replacements *replacements, set<string> *definitions, int *firstUnusedSymbol)
 {
     class MinifierActionFactory : public FrontendActionFactory
     {
@@ -523,7 +523,7 @@ std::unique_ptr<clang::tooling::FrontendActionFactory> MinifierAction::newMinifi
         MinifierActionFactory(Replacements *rs, set<string> *definitions, int *firstUnusedSymbol) : replacements(rs), definitions(definitions), firstUnusedSymbol(firstUnusedSymbol) {};
         std::unique_ptr<FrontendAction> create() override
         {
-            return std::make_unique<MinifierAction>(replacements, definitions, firstUnusedSymbol);
+            return std::make_unique<MinifySymbolsAction>(replacements, definitions, firstUnusedSymbol);
         }
     };
     return std::make_unique<MinifierActionFactory>(replacements, definitions, firstUnusedSymbol);

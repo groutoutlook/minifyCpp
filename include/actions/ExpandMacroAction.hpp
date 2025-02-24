@@ -6,11 +6,12 @@
 
 class ExpandMacroAction : public clang::PreprocessOnlyAction
 {
-private:
-    clang::tooling::Replacements *replacements;
 
 public:
     ExpandMacroAction(clang::tooling::Replacements *replacements);
     virtual void ExecuteAction() override;
     static std::unique_ptr<clang::tooling::FrontendActionFactory> newExpandMacroAction(clang::tooling::Replacements *replacements);
+
+private:
+    clang::tooling::Replacements *replacements;
 };

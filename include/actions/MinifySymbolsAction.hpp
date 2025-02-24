@@ -7,7 +7,7 @@
 #include <set>
 #include <string>
 using namespace llvm;
-class MinifierAction : public clang::ASTFrontendAction
+class MinifySymbolsAction : public clang::ASTFrontendAction
 {
 private:
     clang::tooling::Replacements *replacements;
@@ -15,7 +15,7 @@ private:
     int *firstUnusedSymbol;
 
 public:
-    MinifierAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions, int *firstUnusedSymbol);
+    MinifySymbolsAction(clang::tooling::Replacements *replacements, std::set<std::string> *definitions, int *firstUnusedSymbol);
     virtual std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &compiler,
                                                                   llvm::StringRef inFile) override;
     /**

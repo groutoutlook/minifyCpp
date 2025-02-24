@@ -1,8 +1,8 @@
-#include <actions/expandMacroAction.hpp>
-#include <actions/minifyAction.hpp>
+#include <actions/AddDefinesAction.hpp>
+#include <actions/ExpandMacroAction.hpp>
+#include <actions/FormatAction.hpp>
+#include <actions/MinifySymbolsAction.hpp>
 #include <actions/PPSymbolsAction.hpp>
-#include <format/minifyFormat.hpp>
-#include <format/macroFormat.hpp>
 #include <llvm/Support/CommandLine.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Rewrite/Core/Rewriter.h>
@@ -34,6 +34,10 @@ static cl::opt<bool> noAddMacros(
     "no-add-macros",
     cl::desc("Disable minimizing the file by finding repeated subsequences and defining those as body macros"),
     cl::value_desc("no-add-macros"), cl::init(false), cl::cat(options));
+static cl::opt<bool> noNiceMacros(
+    "no-nice-macros",
+    cl::desc("Disable only adding body macros that have matched open/close parentheses/brackets/braces"),
+    cl::value_desc("no-nice-macros"), cl::init(false), cl::cat(options));
 static cl::list<std::string> argsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
@@ -155,7 +159,7 @@ int main(int argc, const char **argv)
     // then run the variable minify tool
     replacements = Replacements();
     int firstUnusedSymbol = 0;
-    createTool(compDB.get(), tmpFileName, overlayFS).run(MinifierAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get());
+    createTool(compDB.get(), tmpFileName, overlayFS).run(MinifySymbolsAction::newMinifierAction(&replacements, &definitions, &firstUnusedSymbol).get());
     // apply those rewrites
     if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {
@@ -166,8 +170,8 @@ int main(int argc, const char **argv)
     // combine / add macros
     if (!noAddMacros.getValue())
     {
-        MacroFormatter macroFormatter(overlayFS, tmpFileName, firstUnusedSymbol);
-        replacements = macroFormatter.process();
+        replacements = Replacements();
+        createTool(compDB.get(), tmpFileName, overlayFS).run(AddDefinesAction::newAddDefinesAction(firstUnusedSymbol, !noNiceMacros.getValue(), &replacements).get());
         // apply the rewrites
         if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
         {
@@ -176,8 +180,8 @@ int main(int argc, const char **argv)
         }
     }
     // minify format (remove spaces)
-    MinifyFormatter formatter(overlayFS, tmpFileName);
-    replacements = formatter.process();
+    replacements = Replacements();
+    createTool(compDB.get(), tmpFileName, overlayFS).run(FormatAction::newFormatAction(&replacements).get());
     // save format replacements too
     if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
     {

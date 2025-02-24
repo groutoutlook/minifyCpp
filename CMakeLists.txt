@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(GolfC VERSION 1.2.0)
+project(GolfC VERSION 1.2.1)
 
 # configuration
 set(LLVMVersion "17" CACHE STRING "Which LLVM and Clang version to use")
@@ -51,14 +51,13 @@ add_tooling_executable(
   minifier
   # MAIN FILE
   src/main.cpp
-  # FORMAT
-  src/format/minifyFormat.cpp
-  src/format/macroFormat.cpp
 
   # ACTIONS
-  src/actions/minifyAction.cpp
+  src/actions/AddDefinesAction.cpp
+  src/actions/ExpandMacroAction.cpp
+  src/actions/FormatAction.cpp
+  src/actions/MinifySymbolsAction.cpp
   src/actions/PPSymbolsAction.cpp
-  src/actions/expandMacroAction.cpp
 
   # UTILS
   src/util/symbols.cpp

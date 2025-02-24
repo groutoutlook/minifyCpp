@@ -1,10 +1,12 @@
-#include <format/minifyFormat.hpp>
+#include <actions/FormatAction.hpp>
+#include <util/symbols.hpp>
+#include <clang/Frontend/CompilerInstance.h>
 #include <deque>
 using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
 using namespace std;
-MinifyFormatter::MinifyFormatter(IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const string &mainFileName) : fileSystem(fileSystem), mainFileName(mainFileName) {}
+FormatAction::FormatAction(clang::tooling::Replacements *replacements) : replacements(replacements) {}
 
 enum LastTokenType
 {
@@ -13,58 +15,6 @@ enum LastTokenType
     other,          // other cases
 };
 
-bool isPunctuator(const Token &t)
-{
-    return t.isOneOf(
-        tok::l_square,
-        tok::r_square,
-        tok::l_paren,
-        tok::r_paren,
-        tok::l_brace,
-        tok::r_brace,
-        tok::period,
-        tok::ellipsis,
-        tok::amp,
-        tok::ampamp,
-        tok::ampequal,
-        tok::star,
-        tok::starequal,
-        tok::plus,
-        tok::plusplus,
-        tok::plusequal,
-        tok::minus,
-        tok::arrow,
-        tok::minusminus,
-        tok::minusequal,
-        tok::tilde,
-        tok::exclaim,
-        tok::exclaimequal,
-        tok::slash,
-        tok::slashequal,
-        tok::percent,
-        tok::percentequal,
-        tok::less,
-        tok::lessless,
-        tok::lessequal,
-        tok::lesslessequal,
-        tok::spaceship,
-        tok::greater,
-        tok::greatergreater,
-        tok::greaterequal,
-        tok::greatergreaterequal,
-        tok::caret,
-        tok::caretequal,
-        tok::pipe,
-        tok::pipepipe,
-        tok::pipeequal,
-        tok::question,
-        tok::colon,
-        tok::semi,
-        tok::equal,
-        tok::equalequal,
-        tok::comma,
-        tok::hash);
-}
 LastTokenType getTokenType(const Token &t)
 {
     if (isPunctuator(t))
@@ -74,17 +24,9 @@ LastTokenType getTokenType(const Token &t)
     return other;
 }
 
-Replacements MinifyFormatter::process()
+void FormatAction::ExecuteAction()
 {
-    // initialize filemanager and sourcemanager
-    IntrusiveRefCntPtr<clang::FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fileSystem));
-    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
-    DiagnosticsEngine diagnostics(
-        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
-    SourceManager sm(diagnostics, *fileManagerPtr);
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(mainFileName), SrcMgr::C_User));
-
-    Replacements result;
+    SourceManager &sm = getCompilerInstance().getSourceManager();
     LangOptions opts;
     Lexer lexer(sm.getMainFileID(), sm.getMemoryBufferForFileOrFake(*sm.getFileEntryRefForID(sm.getMainFileID())), sm, opts);
 
@@ -115,7 +57,7 @@ Replacements MinifyFormatter::process()
         if (lastTokenType == BOF)
         {
             // no spaces between start of file and first token
-            cantFail(result.add(Replacement(sm, range, "")));
+            cantFail(replacements->add(Replacement(sm, range, "")));
         }
         else if (isFirstPP || (wasPP && tok.isAtStartOfLine()))
         {
@@ -124,7 +66,7 @@ Replacements MinifyFormatter::process()
                 wasPP = false;
             }
             // need a newline between prev location and this location
-            cantFail(result.add(Replacement(sm, range, "\n")));
+            cantFail(replacements->add(Replacement(sm, range, "\n")));
         }
         else if (lastTokenType == punctuator || curTokenType == punctuator)
         {
@@ -142,19 +84,19 @@ Replacements MinifyFormatter::process()
             {
                 // then basically there's some amount of whitespace in between
                 // we just replace that x amount of whitespaces with 1 single whitespace
-                cantFail(result.add(Replacement(sm, range, " ")));
+                cantFail(replacements->add(Replacement(sm, range, " ")));
             }
             else
             {
                 // normally, no spaces between punctuators and things
-                cantFail(result.add(Replacement(sm, range, "")));
+                cantFail(replacements->add(Replacement(sm, range, "")));
             }
         }
         else if (lastTokenType == other)
         {
             // both this and the previous are some sort of raw-identifiers
             // so use a space
-            cantFail(result.add(Replacement(sm, range, " ")));
+            cantFail(replacements->add(Replacement(sm, range, " ")));
         }
 
         // adjust deque
@@ -174,7 +116,23 @@ Replacements MinifyFormatter::process()
     SourceLocation replacementStart = prevLocation;
     SourceLocation replacementEnd = tok.getLocation();
     const CharSourceRange &range = CharSourceRange::getCharRange(SourceRange(replacementStart, replacementEnd));
-    cantFail(result.add(Replacement(sm, range, "")));
+    cantFail(replacements->add(Replacement(sm, range, "")));
+}
 
-    return result;
+// adapter
+unique_ptr<FrontendActionFactory> FormatAction::newFormatAction(Replacements *replacements)
+{
+    class Adapter : public FrontendActionFactory
+    {
+    private:
+        Replacements *replacements;
+
+    public:
+        Adapter(Replacements *replacements) : replacements(replacements) {}
+        std::unique_ptr<FrontendAction> create() override
+        {
+            return std::make_unique<FormatAction>(replacements);
+        }
+    };
+    return std::make_unique<Adapter>(replacements);
 }
