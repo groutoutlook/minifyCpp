@@ -1,5 +1,6 @@
 #include <format/minifyFormat.hpp>
 #include <deque>
+#include <util/symbols.hpp>
 using namespace clang;
 using namespace clang::tooling;
 using namespace llvm;
@@ -13,58 +14,6 @@ enum LastTokenType
     other,          // other cases
 };
 
-bool isPunctuator(const Token &t)
-{
-    return t.isOneOf(
-        tok::l_square,
-        tok::r_square,
-        tok::l_paren,
-        tok::r_paren,
-        tok::l_brace,
-        tok::r_brace,
-        tok::period,
-        tok::ellipsis,
-        tok::amp,
-        tok::ampamp,
-        tok::ampequal,
-        tok::star,
-        tok::starequal,
-        tok::plus,
-        tok::plusplus,
-        tok::plusequal,
-        tok::minus,
-        tok::arrow,
-        tok::minusminus,
-        tok::minusequal,
-        tok::tilde,
-        tok::exclaim,
-        tok::exclaimequal,
-        tok::slash,
-        tok::slashequal,
-        tok::percent,
-        tok::percentequal,
-        tok::less,
-        tok::lessless,
-        tok::lessequal,
-        tok::lesslessequal,
-        tok::spaceship,
-        tok::greater,
-        tok::greatergreater,
-        tok::greaterequal,
-        tok::greatergreaterequal,
-        tok::caret,
-        tok::caretequal,
-        tok::pipe,
-        tok::pipepipe,
-        tok::pipeequal,
-        tok::question,
-        tok::colon,
-        tok::semi,
-        tok::equal,
-        tok::equalequal,
-        tok::comma,
-        tok::hash);
-}
 LastTokenType getTokenType(const Token &t)
 {
     if (isPunctuator(t))

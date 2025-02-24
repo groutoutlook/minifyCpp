@@ -9,6 +9,8 @@ using namespace clang::tooling;
 using namespace llvm;
 using namespace std;
 
+const int DEFINE_WEIGHT = 10;
+
 // ctor
 MacroFormatter::MacroFormatter(IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const string &mainFileName, int firstUnusedSymbol) : fileSystem(fileSystem), mainFileName(mainFileName), firstUnusedSymbol(firstUnusedSymbol) {}
 
@@ -16,10 +18,16 @@ struct TokenInfo
 {
     string spelling;
     bool isPP;
+    bool isPunctuator;
+    int weight; // gets initialized by program later
 
     // ctor
-    TokenInfo(string spelling, bool isPP = false) : spelling(spelling), isPP(isPP) {}
+    TokenInfo() : spelling(""), isPP(false), isPunctuator(false) {}
+    TokenInfo(string spelling, bool isPP, bool isPunctuator) : spelling(spelling), isPP(isPP), isPunctuator(isPunctuator) {}
     friend ostream &operator<<(ostream &o, const TokenInfo &t) { return o << t.spelling; }
+
+    // for map
+    bool operator<(const TokenInfo &other) const { return spelling < other.spelling; }
 };
 
 // returns tokens and the end location
@@ -37,6 +45,7 @@ pair<vector<TokenInfo>, SourceLocation> getTokens(SourceManager &sm)
     {
         string spelling = lexer.getSpelling(tok, sm, lo);
         bool isPP = false;
+        bool punctuator = isPunctuator(tok);
         if (tok.isAtStartOfLine() && tok.is(tok::hash))
         {
             // combine everything in this preprocessor
@@ -65,79 +74,10 @@ pair<vector<TokenInfo>, SourceLocation> getTokens(SourceManager &sm)
         {
             lexer.LexFromRawLexer(tok);
         }
-        tokens.push_back(TokenInfo(spelling, isPP));
+        tokens.push_back(TokenInfo(spelling, isPP, punctuator && !isPP));
     }
 
     return {tokens, tok.getLocation()};
-}
-
-pair<int, vector<int>> mostValuableSubarrayV1(vector<int> &tokens, map<int, int> &weights, int k)
-{
-    // brute force O(N**3) solution
-    int maxWorth = numeric_limits<int>::min();
-    pair<int, int> resultStartEnd; // [start, end] inclusive
-    for (int i = 0; i < tokens.size(); ++i)
-    {
-        int weight = 0;
-        vector<int> pi = {0}; // kmp pi array
-        for (int j = i; j < tokens.size(); ++j)
-        {
-            // add this token
-            weight += weights[tokens[j]];
-            if (j - i > 0)
-            {
-                // calculate pi
-                int length = pi[j - i - 1];
-                while (length > 0 && tokens[j] != tokens[i + length])
-                {
-                    length = pi[length - 1];
-                }
-                if (tokens[j] == tokens[i + length])
-                {
-                    length += 1;
-                }
-                pi.push_back(length);
-            }
-
-            // now scan the remainder of the string to get counts
-            int counts = 1;
-            int length = 0;
-            for (int l = j + 1; l < tokens.size(); ++l)
-            {
-                while (length > 0 && tokens[l] != tokens[i + length])
-                {
-                    length = pi[length - 1];
-                }
-                if (tokens[l] == tokens[i + length])
-                {
-                    length += 1;
-                }
-
-                // check if found a match; if so, reset length to avoid overlaps
-                if (length == j - i + 1)
-                {
-                    counts += 1;
-                    length = 0;
-                }
-            }
-
-            // now update maxWorth potentially
-            int worth = (counts - 1) * (weight - k);
-            if (worth > maxWorth)
-            {
-                maxWorth = worth;
-                resultStartEnd = {i, j};
-            }
-        }
-    }
-
-    // return result
-    vector<int> result;
-    for (int i = resultStartEnd.first; i <= resultStartEnd.second; ++i)
-    {
-        result.push_back(tokens[i]);
-    }
-    return {maxWorth, result};
 }
 vector<int> sortCyclicShifts(const vector<int> &arr)
 {
@@ -225,10 +165,10 @@ vector<int> sortCyclicShifts(const vector<int> &arr)
 }
 vector<int> constructSuffixArray(vector<int> &arr)
 {
-    arr.push_back(-1);
+    arr.push_back(-1); // smallest number (since all arr numbers >= 0), so guaranteed to end up at front
     vector<int> sortedShifts = sortCyclicShifts(arr);
-    arr.pop_back();
-    sortedShifts.erase(sortedShifts.begin()); // everything except front; O(n) operation
+    arr.pop_back();                           // undo change to arr
+    sortedShifts.erase(sortedShifts.begin()); // get rid of the thing associated with our "-1"; O(n) operation
     return sortedShifts;
 }
 vector<int> constructLCPArray(vector<int> &arr, vector<int> &suffixArray)
@@ -260,12 +200,31 @@ vector<int> constructLCPArray(vector<int> &arr, vector<int> &suffixArray)
     }
     return lcp;
 }
-int countOccurrences(vector<int> &source, vector<int> &part)
+// better checker
+int calculateResultingLength(vector<int> &tokens, map<int, TokenInfo> &reverseDistinctTokens)
 {
-    if (part.size() > source.size())
+    if (tokens.size() == 0)
     {
         return 0;
     }
+    int length = reverseDistinctTokens[tokens[0]].weight;
+    for (int i = 1; i < tokens.size(); ++i)
+    {
+        TokenInfo prev = reverseDistinctTokens[tokens[i - 1]];
+        TokenInfo cur = reverseDistinctTokens[tokens[i]];
+        if (!prev.isPP && !cur.isPP && !prev.isPunctuator && !cur.isPunctuator)
+        {
+            // !prev.isPP && !cur.isPP && !prev.isPunctuator && !cur.isPunctuator)
+            // means that we need a space between prev and cur
+            length += 1;
+        }
+        // and add cur's weight too
+        length += cur.weight;
+    }
+    return length;
+}
+vector<int> replaceOccurrences(vector<int> &source, vector<int> &part, int replacement)
+{
     // compute pi for part
     vector<int> pi(part.size(), 0);
     for (int i = 1; i < part.size(); ++i)
@@ -281,11 +240,10 @@ int countOccurrences(vector<int> &source, vector<int> &part)
         }
         pi[i] = length;
     }
-
-    // use that to match through source
+    // now use that to match through source
+    vector<int> result;
     int length = 0;
-    int count = 0;
-    for (int i = 1; i < source.size(); ++i)
+    for (int i = 0; i < source.size(); ++i)
     {
         while (length > 0 && source[i] != part[length])
         {
@@ -297,21 +255,28 @@ int countOccurrences(vector<int> &source, vector<int> &part)
         }
 
         // check if it was a match
+        result.push_back(source[i]);
         if (length == part.size())
         {
-            length = 0; // reset to prevent overlap matches
-            count++;
+            // pop off part
+            for (int j = 0; j < part.size(); ++j)
+            {
+                result.pop_back();
+            }
+            length = 0;                    // reset to prevent overlap matches
+            result.push_back(replacement); // and push replacement
         }
     }
-    return count;
+    return result;
 }
-pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, int> &weights, int k)
+
+pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, TokenInfo> &reverseDistinctTokens, int replacement)
 {
     int n = tokens.size();
     vector<int> suffixArray = constructSuffixArray(tokens);
     vector<int> lcpArray = constructLCPArray(tokens, suffixArray);
 
-    int maxWorth = numeric_limits<int>::min();
+    int minLength = numeric_limits<int>::max();
     vector<int> best;
     for (int i = 1; i < n; ++i)
     {
@@ -321,25 +286,27 @@ pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, int>
             continue;
         }
 
-        // calculate weight and collect part
+        // collect part
         int start = suffixArray[i];
-        int weightedSum = 0;
         vector<int> part;
         for (int j = 0; j < length; ++j)
         {
-            weightedSum += weights[tokens[start + j]];
             part.push_back(tokens[start + j]);
         }
-        // calculate true worth
-        int counts = countOccurrences(tokens, part);
-        int worth = (counts - 1) * (weightedSum - k);
-        if (worth > maxWorth)
+        // calculate length of resulting tokens
+        vector<int> resultingTokens = replaceOccurrences(tokens, part, replacement);
+        int resultingLength = calculateResultingLength(resultingTokens, reverseDistinctTokens);
+        // but also add the length from the define
+        // "#define " + replacement + " " + part + "\n"
+        resultingLength += DEFINE_WEIGHT + reverseDistinctTokens[replacement].weight + calculateResultingLength(part, reverseDistinctTokens);
+
+        if (resultingLength < minLength)
         {
-            maxWorth = worth;
-            best = std::move(part);
+            minLength = resultingLength;
+            best = part;
         }
     }
-    return {maxWorth, best};
+    return {minLength, best};
 }
 
 // process
@@ -361,34 +328,33 @@ clang::tooling::Replacements MacroFormatter::process()
 
     // next up, convert that into distinct numbers
     int cur = 0;
-    map<string, int> distinctTokens;
-    map<string, int> distinctPPTokens;
-    map<int, string> reverseDistinctTokens;
-    map<int, int> weights; // weight[tokenNumber] = length(token.spelling)
+    map<TokenInfo, int> distinctTokens;
+    map<TokenInfo, int> distinctPPTokens;
+    map<int, TokenInfo> reverseDistinctTokens;
     vector<int> tokenNumbers;
-    for (const TokenInfo &token : tokens)
+    for (TokenInfo &token : tokens)
     {
         // special case for PP tokens and main
         if (token.isPP || token.spelling == "main")
         {
-            if (distinctPPTokens.find(token.spelling) == distinctPPTokens.end())
+            if (distinctPPTokens.find(token) == distinctPPTokens.end())
             {
-                distinctPPTokens[token.spelling] = cur++;
+                distinctPPTokens[token] = cur++;
                 // make it 0 that way later algorithms will never touch this
-                weights[distinctPPTokens[token.spelling]] = 0;
-                reverseDistinctTokens[distinctPPTokens[token.spelling]] = token.spelling;
+                token.weight = 0;
+                reverseDistinctTokens[distinctPPTokens[token]] = token;
             }
-            tokenNumbers.push_back(distinctPPTokens[token.spelling]);
+            tokenNumbers.push_back(distinctPPTokens[token]);
         }
         else
         {
-            if (distinctTokens.find(token.spelling) == distinctTokens.end() && !token.isPP)
+            if (distinctTokens.find(token) == distinctTokens.end() && !token.isPP)
             {
-                distinctTokens[token.spelling] = cur++;
-                weights[distinctTokens[token.spelling]] = token.spelling.length();
-                reverseDistinctTokens[distinctTokens[token.spelling]] = token.spelling;
+                distinctTokens[token] = cur++;
+                token.weight = token.spelling.length();
+                reverseDistinctTokens[distinctTokens[token]] = token;
             }
-            tokenNumbers.push_back(distinctTokens[token.spelling]);
+            tokenNumbers.push_back(distinctTokens[token]);
         }
     }
 
@@ -396,96 +362,61 @@ clang::tooling::Replacements MacroFormatter::process()
     set<string> reserved; // empty, just for convenience
     int curUnusedSymbol = firstUnusedSymbol;
     auto [nextUnusedSymbol, curString] = toSymbol(curUnusedSymbol, reserved, &reserved);
-    distinctTokens[curString] = cur++; // use cur, not curUnusedSymbol since curUnusedSymbol will be different and probably less
-    weights[distinctTokens[curString]] = curString.length();
-    reverseDistinctTokens[distinctTokens[curString]] = curString;
+    TokenInfo curStringToken(curString, false, false);
+    distinctTokens[curStringToken] = cur++; // use cur, not curUnusedSymbol since curUnusedSymbol will be different and probably less
+    curStringToken.weight = curString.length();
+    reverseDistinctTokens[distinctTokens[curStringToken]] = curStringToken;
 
     // continuously replace the most valuable subarray while it's worth it
-    auto [worth, sequence] = mostValuableSubarrayV2(tokenNumbers, weights, curString.length());
-    // TODO - take into account the fact that this is an identifier, so replacing
-    // punctuation will actually result in an extra space
-    while (worth > 11) // 11 because have to define it and add the newlines
+    int curLength = calculateResultingLength(tokenNumbers, reverseDistinctTokens);
+    auto [length, sequence] = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken]);
+    vector<string> definesToAdd;
+    while (length < curLength)
     {
-        // replace all instances of the returned subarray
-        // with a single token that corresponds to curString
-
-        // to do that, let's use smth similar to kmp
-        // precompute pi for the sequence
-        vector<int> pi(sequence.size(), 0);
-        for (int i = 1; i < sequence.size(); ++i)
-        {
-            int length = pi[i - 1];
-            while (length > 0 && sequence[i] != sequence[length])
-            {
-                length = pi[length - 1];
-            }
-            if (sequence[i] == sequence[length])
-            {
-                ++length;
-            }
-            pi[i] = length;
-        }
-
+        // replace all instances of the returned subarray with the replacement token
+        vector<int> editedTokenNumbers = replaceOccurrences(tokenNumbers, sequence, distinctTokens[curStringToken]);
         // add the definition at the top of the file
-        vector<int> editedTokenNumbers;
-        string defineString = "\n#define " + curString + " ";
+        string defineString = "#define " + curString + " ";
         for (int i = 0; i < sequence.size(); ++i)
         {
-            defineString += reverseDistinctTokens[sequence[i]] + " ";
+            defineString += reverseDistinctTokens[sequence[i]].spelling + " ";
         }
         defineString += "\n";
+
         // add to distinctTokens
-        distinctPPTokens[defineString] = cur++;
-        weights[distinctPPTokens[defineString]] = 0; // is a preprocessor
-        reverseDistinctTokens[distinctPPTokens[defineString]] = defineString;
-        editedTokenNumbers.push_back(distinctPPTokens[defineString]);
+        TokenInfo defineToken(defineString, true, false);
+        distinctPPTokens[defineToken] = cur++;
+        defineToken.weight = 0; // is a preprocessor
+        reverseDistinctTokens[distinctPPTokens[defineToken]] = defineToken;
+        definesToAdd.push_back(defineString);
 
-        // then use pi to find all matches in tokenNumbers
-        int length = 0;
-        for (int i = 0; i < tokenNumbers.size(); ++i)
-        {
-            while (length > 0 && tokenNumbers[i] != sequence[length])
-            {
-                length = pi[length - 1];
-            }
-            if (sequence[length] == tokenNumbers[i])
-            {
-                ++length;
-            }
-            editedTokenNumbers.push_back(tokenNumbers[i]);
-            // if we found a match, replace it with the new symbol
-            if (length == sequence.size())
-            {
-                length = 0; // reset that way we don't get overlaps
-                for (int j = 0; j < sequence.size(); ++j)
-                {
-                    editedTokenNumbers.pop_back();
-                }
-                editedTokenNumbers.push_back(distinctTokens[curString]);
-            }
-        }
-
-        // update tokenNumbers
+        // update tokenNumbers and curLength
         tokenNumbers = std::move(editedTokenNumbers); // no point in waiting for a copy since we're just gonna discard editedTokenNumbers
+        curLength = calculateResultingLength(tokenNumbers, reverseDistinctTokens);
         // now we can compute the next unused symbol
         curUnusedSymbol = nextUnusedSymbol;
         pair<int, string> nextP = toSymbol(curUnusedSymbol, reserved, &reserved);
         nextUnusedSymbol = nextP.first;
         curString = nextP.second;
-        distinctTokens[curString] = cur++;
-        weights[distinctTokens[curString]] = curString.length();
-        reverseDistinctTokens[distinctTokens[curString]] = curString;
+        curStringToken = TokenInfo(curString, false, false);
+        distinctTokens[curStringToken] = cur++;
+        curStringToken.weight = curString.length();
+        reverseDistinctTokens[distinctTokens[curStringToken]] = curStringToken;
         // and compute the next most valuable subarray
-        pair<int, vector<int>> result = mostValuableSubarrayV2(tokenNumbers, weights, curString.length());
-        worth = result.first;
+        pair<int, vector<int>> result = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken]);
+        length = result.first;
         sequence = result.second;
     }
 
     // convert back into tokens
     string resultString;
+    for (string define : definesToAdd)
+    {
+        resultString += define;
+    }
     for (int tokenNumber : tokenNumbers)
     {
-        resultString += reverseDistinctTokens[tokenNumber];
+        resultString += reverseDistinctTokens[tokenNumber].spelling;
         resultString += " ";
     }
     Replacements replacements;
