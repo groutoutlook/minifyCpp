@@ -1,4 +1,4 @@
-#include <actions/expandMacroAction.hpp>
+#include <actions/ExpandMacroAction.hpp>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Frontend/CompilerInstance.h>

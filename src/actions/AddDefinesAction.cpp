@@ -1,5 +1,6 @@
 #include <util/symbols.hpp>
-#include <format/macroFormat.hpp>
+#include <actions/AddDefinesAction.hpp>
+#include <clang/Frontend/CompilerInstance.h>
 #include <algorithm>
 #include <sstream>
 
@@ -12,7 +13,7 @@ using namespace std;
 const int DEFINE_WEIGHT = 10;
 
 // ctor
-MacroFormatter::MacroFormatter(IntrusiveRefCntPtr<llvm::vfs::FileSystem> fileSystem, const string &mainFileName, int firstUnusedSymbol) : fileSystem(fileSystem), mainFileName(mainFileName), firstUnusedSymbol(firstUnusedSymbol) {}
+AddDefinesAction::AddDefinesAction(int firstUnusedSymbol, bool niceMacros, Replacements *replacements) : firstUnusedSymbol(firstUnusedSymbol), niceMacros(niceMacros), replacements(replacements) {}
 
 struct TokenInfo
 {
@@ -270,7 +271,7 @@ vector<int> replaceOccurrences(vector<int> &source, vector<int> &part, int repla
     return result;
 }
 
-pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, TokenInfo> &reverseDistinctTokens, int replacement)
+pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, TokenInfo> &reverseDistinctTokens, int replacement, bool niceMacros)
 {
     int n = tokens.size();
     vector<int> suffixArray = constructSuffixArray(tokens);
@@ -286,13 +287,70 @@ pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, Toke
             continue;
         }
 
-        // collect part
+        // collect part, checking for parentheses, brackets, and braces
         int start = suffixArray[i];
         vector<int> part;
+        vector<bool> goodIncluding; // false after first negative
+        int parenCount = 0, bracketCount = 0, braceCount = 0;
+        bool matched = true;
         for (int j = 0; j < length; ++j)
         {
             part.push_back(tokens[start + j]);
+
+            // match checking
+            if (reverseDistinctTokens[tokens[start + j]].spelling == "(")
+                ++parenCount;
+            else if (reverseDistinctTokens[tokens[start + j]].spelling == ")")
+                --parenCount;
+            else if (reverseDistinctTokens[tokens[start + j]].spelling == "[")
+                ++bracketCount;
+            else if (reverseDistinctTokens[tokens[start + j]].spelling == "]")
+                --bracketCount;
+            else if (reverseDistinctTokens[tokens[start + j]].spelling == "{")
+                ++braceCount;
+            else if (reverseDistinctTokens[tokens[start + j]].spelling == "}")
+                --braceCount;
+            if (parenCount < 0 || bracketCount < 0 || braceCount < 0)
+                matched = false;
+            goodIncluding.push_back(matched);
         }
+        matched = matched && (parenCount == 0 && bracketCount == 0 && braceCount == 0);
+
+        // if we want to check for nice macros, check that and potentially skip this match
+        if (niceMacros && !matched)
+        {
+            // so it's not nice
+            // but it may be the only one of its kind that we'll check
+            // because the property of prefix of suffix means that we might be checking something like
+            // printf (
+            // and if we don't get rid of the trailing (, then we'll never end up replacing the printf part
+            // so thus try to remove trailing parentheses/brackets/braces
+            while (part.size() > 0 && (!goodIncluding[part.size() - 1] || !(parenCount == 0 && bracketCount == 0 && braceCount == 0)))
+            {
+                // pop off the last token
+                int num = part.back();
+                part.pop_back();
+                goodIncluding.pop_back();
+                // adjust counts
+                if (reverseDistinctTokens[num].spelling == "(")
+                    --parenCount;
+                else if (reverseDistinctTokens[num].spelling == ")")
+                    ++parenCount;
+                else if (reverseDistinctTokens[num].spelling == "[")
+                    --bracketCount;
+                else if (reverseDistinctTokens[num].spelling == "]")
+                    ++bracketCount;
+                else if (reverseDistinctTokens[num].spelling == "{")
+                    --braceCount;
+                else if (reverseDistinctTokens[num].spelling == "}")
+                    ++braceCount;
+            }
+            if (part.size() == 0)
+            {
+                continue; // no valid match
+            }
+        }
+
         // calculate length of resulting tokens
         vector<int> resultingTokens = replaceOccurrences(tokens, part, replacement);
         int resultingLength = calculateResultingLength(resultingTokens, reverseDistinctTokens);
@@ -310,20 +368,10 @@ pair<int, vector<int>> mostValuableSubarrayV2(vector<int> &tokens, map<int, Toke
 }
 
 // process
-clang::tooling::Replacements MacroFormatter::process()
+void AddDefinesAction::ExecuteAction()
 {
-    // initialize sourcemanager and set main file
-    IntrusiveRefCntPtr<clang::FileManager> fileManagerPtr(new FileManager(FileSystemOptions(), fileSystem));
-    IntrusiveRefCntPtr<DiagnosticOptions> diagOpts(new DiagnosticOptions());
-    DiagnosticsEngine diagnostics(
-        IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*diagOpts);
-    SourceManager sm(diagnostics, *fileManagerPtr);
-    sm.setMainFileID(sm.getOrCreateFileID(*fileManagerPtr->getFileRef(mainFileName), SrcMgr::C_User));
-
-    // initialize result
-    clang::tooling::Replacements result;
-
     // step 1 - lex the file into raw tokens;
+    SourceManager &sm = getCompilerInstance().getSourceManager();
     auto [tokens, endLocation] = getTokens(sm);
 
     // next up, convert that into distinct numbers
@@ -369,7 +417,7 @@ clang::tooling::Replacements MacroFormatter::process()
 
     // continuously replace the most valuable subarray while it's worth it
     int curLength = calculateResultingLength(tokenNumbers, reverseDistinctTokens);
-    auto [length, sequence] = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken]);
+    auto [length, sequence] = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken], niceMacros);
     vector<string> definesToAdd;
     while (length < curLength)
     {
@@ -403,7 +451,7 @@ clang::tooling::Replacements MacroFormatter::process()
         curStringToken.weight = curString.length();
         reverseDistinctTokens[distinctTokens[curStringToken]] = curStringToken;
         // and compute the next most valuable subarray
-        pair<int, vector<int>> result = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken]);
+        pair<int, vector<int>> result = mostValuableSubarrayV2(tokenNumbers, reverseDistinctTokens, distinctTokens[curStringToken], niceMacros);
         length = result.first;
         sequence = result.second;
     }
@@ -419,7 +467,24 @@ clang::tooling::Replacements MacroFormatter::process()
         resultString += reverseDistinctTokens[tokenNumber].spelling;
         resultString += " ";
     }
-    Replacements replacements;
-    llvm::cantFail(replacements.add(Replacement(sm, CharSourceRange::getCharRange(sm.getLocForStartOfFile(sm.getMainFileID()), endLocation), resultString)));
-    return replacements;
+    llvm::cantFail(replacements->add(Replacement(sm, CharSourceRange::getCharRange(sm.getLocForStartOfFile(sm.getMainFileID()), endLocation), resultString)));
+}
+// adapter
+unique_ptr<FrontendActionFactory> AddDefinesAction::newAddDefinesAction(int firstUnusedSymbol, bool niceMacros, Replacements *replacements)
+{
+    class Adapter : public FrontendActionFactory
+    {
+    private:
+        int firstUnusedSymbol;
+        bool niceMacros;
+        Replacements *replacements;
+
+    public:
+        Adapter(int firstUnusedSymbol, bool niceMacros, Replacements *replacements) : firstUnusedSymbol(firstUnusedSymbol), niceMacros(niceMacros), replacements(replacements) {};
+        virtual unique_ptr<FrontendAction> create() override
+        {
+            return make_unique<AddDefinesAction>(firstUnusedSymbol, niceMacros, replacements);
+        }
+    };
+    return make_unique<Adapter>(firstUnusedSymbol, niceMacros, replacements);
 }

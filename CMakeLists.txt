@@ -51,14 +51,13 @@ add_tooling_executable(
   minifier
   # MAIN FILE
   src/main.cpp
-  # FORMAT
-  src/format/minifyFormat.cpp
-  src/format/macroFormat.cpp
 
   # ACTIONS
-  src/actions/minifyAction.cpp
+  src/actions/AddDefinesAction.cpp
+  src/actions/ExpandMacroAction.cpp
+  src/actions/FormatAction.cpp
+  src/actions/MinifySymbolsAction.cpp
   src/actions/PPSymbolsAction.cpp
-  src/actions/expandMacroAction.cpp
 
   # UTILS
   src/util/symbols.cpp
