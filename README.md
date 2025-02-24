@@ -17,6 +17,7 @@ minifier myFile.c -- -I /usr/lib/clang/17/include
 
 - Removes whitespace in between symbols
 - Renames all structs, fields, enums, typedefs, and variables in the main file to the first available symbol.
+- Replaces repeated tokens with body macros
 - Edit in-place or print edits to stdout
 
 ## Example
@@ -98,17 +99,31 @@ int main(int argc, char *argv[])
 The current output is the following:
 
 ```c
+#define l printf
 #define m int
-#define l printf(
 #include<stdio.h>
 #include<stdlib.h>
 #include<unistd.h>
 #include<fcntl.h>
 #include<ctype.h>
-m main(m a,char*b[]){m c=STDIN_FILENO;if(a==2)c=open(b[1],O_RDONLY);m d=1;char e[16];char*f=e;m g=16;m h;m i=0;while(d){h=read(c,f,g);if(h==-1)exit(2);f+=h;g-=h;if(g==0||(h==0&&g!=16)){l "%08x    ",i);i+=16;for(m j=0;j<16;++j){if(j<16-g)l "%02hhx",e[j]);else l "  ");if(j%2!=0)l " ");}l "    ");for(m k=0;k<16;++k){if(k<16-g){if(isprint(e[k]))l "%c",e[k]);else l ".");}else l " ");}f=e;g=16;l "\n");}d=h!=0;}}
+m main(m a,char*b[]){m c=STDIN_FILENO;if(a==2)c=open(b[1],O_RDONLY);m d=1;char e[16];char*f=e;m g=16;m h;m i=0;while(d){h=read(c,f,g);if(h==-1)exit(2);f+=h;g-=h;if(g==0||(h==0&&g!=16)){l("%08x    ",i);i+=16;for(m j=0;j<16;++j){if(j<16-g)l("%02hhx",e[j]);else l("  ");if(j%2!=0)l(" ");}l("    ");for(m k=0;k<16;++k){if(k<16-g){if(isprint(e[k]))l("%c",e[k]);else l(".");}else l(" ");}f=e;g=16;l("\n");}d=h!=0;}}
 ```
 
-## Building Natively
+## Arguments
+
+This program supports the following arguments:
+
+- `--expand-all` - When set, expands all macros encountered in the source file. This is useful when
+  the source file contains unhygienic macros that would otherwise cause the minifier to fail.
+- `--no-add-macros` - When set, disables adding defines to replace repeated tokens. Can significantly improve
+  runtime on larger files, at the cost of a suboptimal result
+- `--no-nice-macros` - When set, disables checking if the sequences of tokens that will be replaced by defines
+  have well-formed parentheses, brackets, and braces. May result in slightly shorter programs, but may also
+  cause the output program to have different behavior if uneven parentheses replacement occurs inside function
+  macros. Only works when `--no-add-macros` is not set.
+- `-i` - Apply changes in place. Only works when the input is not from stdin.
+
+## Building/Running Natively
 
 In order to build the executable natively, you'll need to have the following packages
 installed on your system:
@@ -134,6 +149,9 @@ the following package:
 
 - libllvm17
 
+You will still need all the includes for your program. This means you'll want to have a working
+C compiler on your system, or at least the headers that come with one.
+
 ## Building/Running with Docker
 
 You can also build and run the executable with Docker. Simply run the below command to build
@@ -154,7 +172,7 @@ docker run -i minifier < myFile.c
 Why minify C code? Unlike Javascrpt and HTML where the source code must be sent over the web,
 making code size actually important, source code size has no effect on C programs. After all,
 everything gets compiled down into the same bytecode. However, some UC professors have been
-known to offer EC assignments that ask their students to "golf" their code (use the minimum
+known to offer extra credit assignments that ask their students to "golf" their code (use the minimum
 number of bytes possible to implement their program). While this repository won't optimize
 your code by changing its structure, it will at least minify any existing code by removing
 any spaces and replacing repeated patterns with defines (when it's worth it).
@@ -165,7 +183,7 @@ The design is quite simple. First, we make a pass over the input and convert all
 into minimum-size variables.
 
 Then, we do a pass over this output to look for patterns of repeated tokens. If a pattern satisfies
-the equation `N*L < 9+X+L`, where N is the number of appearances, L is the length of the pattern,
+the equation `N*L < 10+X+L + N*X`, where N is the number of appearances, L is the length of the pattern,
 in bytes, and X is the length of the next available identifier, then a define is added to the file
 and all occurrences of the pattern are replaced with the identifier assigned to the pattern.
 
@@ -175,7 +193,8 @@ Finally, we do a pass over the tokens to remove spaces where applicable.
 
 - minify-C is meant for minimizing a single source C file. It will not work with C++.
 - While minify-C can properly handle includes, there is currently no support for multi-file minimization.
-- Macros that declare variables may end up conflicting with minified variables
+- Macros that declare variables may end up conflicting with minified variables. Use the `--expand-all` flag
+  if you run into issues.
 - Macros that are used to reference different variables across
   their lifetime will cause the program to crash. Use the `--expand-all` flag for this.
 - Large files may take a long time to process due to define macro addition. If minimizing is taking too long, try using the `--no-add-macros` flag.

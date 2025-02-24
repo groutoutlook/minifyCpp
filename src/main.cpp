@@ -34,10 +34,10 @@ static cl::opt<bool> noAddMacros(
     "no-add-macros",
     cl::desc("Disable minimizing the file by finding repeated subsequences and defining those as body macros"),
     cl::value_desc("no-add-macros"), cl::init(false), cl::cat(options));
-static cl::opt<bool> niceMacros(
-    "nice-macros",
-    cl::desc("Whether to only add body macros that have matched open/close parentheses/brackets/braces"),
-    cl::value_desc("nice-macros"), cl::init(false), cl::cat(options));
+static cl::opt<bool> noNiceMacros(
+    "no-nice-macros",
+    cl::desc("Disable only adding body macros that have matched open/close parentheses/brackets/braces"),
+    cl::value_desc("no-nice-macros"), cl::init(false), cl::cat(options));
 static cl::list<std::string> argsAfter(
     "extra-arg",
     cl::desc("Additional argument to append to the compiler command line"),
@@ -171,7 +171,7 @@ int main(int argc, const char **argv)
     if (!noAddMacros.getValue())
     {
         replacements = Replacements();
-        createTool(compDB.get(), tmpFileName, overlayFS).run(AddDefinesAction::newAddDefinesAction(firstUnusedSymbol, niceMacros.getValue(), &replacements).get());
+        createTool(compDB.get(), tmpFileName, overlayFS).run(AddDefinesAction::newAddDefinesAction(firstUnusedSymbol, !noNiceMacros.getValue(), &replacements).get());
         // apply the rewrites
         if (!updateMainFileContents(overlayFS, tmpFileName, replacements))
         {
