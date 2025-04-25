@@ -1,14 +1,14 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(GolfC VERSION 1.2.1)
+project(minifyCpp VERSION 1.2.1)
 
 # configuration
-set(LLVMVersion "17" CACHE STRING "Which LLVM and Clang version to use")
+#set(LLVMVersion "21" CACHE STRING "Which LLVM and Clang version to use")
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS "-fno-rtti")
 
-find_package(LLVM ${LLVMVersion} REQUIRED)
-find_package(Clang ${LLVMVersion} REQUIRED)
+find_package(LLVM REQUIRED)
+find_package(Clang REQUIRED)
 
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${CLANG_INCLUDE_DIRS})
@@ -18,7 +18,8 @@ add_definitions(${LLVM_DEFINITIONS})
 add_definitions(${CLANG_DEFINITIONS})
 
 include(AddLLVM)
-include(/usr/lib/llvm-${LLVMVersion}/lib/cmake/clang/AddClang.cmake)  # not sure why this needed the explicit path...
+set(CMAKE_MODULE_PATH "D:/ProgramDataD/MiscLang/01-C++/repo/llvm-project/clang/cmake/modules" "D:/ProgramDataD/MiscLang/01-C++/repo/llvm-project/llvm/cmake/modules")
+include(AddClang)
 
 macro (add_tooling_executable name)
   add_clang_executable(${name} ${ARGN})
